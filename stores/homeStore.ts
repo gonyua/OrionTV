@@ -30,12 +30,13 @@ export interface Category {
 const recordCategory: Category = { title: "最近播放", type: "record" };
 
 const doubanMineCategories: Category[] = [
+  { title: "看过", type: "douban-mine", doubanStatus: "collect" },
   { title: "在看", type: "douban-mine", doubanStatus: "do" },
   { title: "想看", type: "douban-mine", doubanStatus: "wish" },
-  { title: "看过", type: "douban-mine", doubanStatus: "collect" },
 ];
 
 const initialCategories: Category[] = [
+  ...doubanMineCategories,
   recordCategory,
   { title: "热门剧集", type: "tv", tag: "热门" },
   { title: "电视剧", type: "tv", tags: ["国产剧", "美剧", "英剧", "韩剧", "日剧", "港剧", "日本动画", "动画"] },
@@ -63,6 +64,9 @@ const initialCategories: Category[] = [
   { title: "综艺", type: "tv", tag: "综艺" },
   { title: "豆瓣 Top250", type: "movie", tag: "top250" },
 ];
+
+const defaultSelectedCategory =
+  initialCategories.find((category) => category.title === "热门剧集") || initialCategories[0];
 
 // 添加缓存项接口
 interface CacheItem {
@@ -105,7 +109,7 @@ const dataCache = new Map<string, CacheItem>();
 
 const useHomeStore = create<HomeState>((set, get) => ({
   categories: initialCategories,
-  selectedCategory: initialCategories[0],
+  selectedCategory: defaultSelectedCategory,
   contentData: [],
   loading: true,
   loadingMore: false,
@@ -156,7 +160,11 @@ const useHomeStore = create<HomeState>((set, get) => ({
       if (selectedCategory.type === "record") {
         const { isLoggedIn } = useAuthStore.getState();
         if (!isLoggedIn) {
-          set({ contentData: [], hasMore: false });
+          set({
+            contentData: [],
+            hasMore: false,
+            error: "认证失败，请重新登录",
+          });
           return;
         }
         const records = await PlayRecordManager.getAll();
@@ -356,13 +364,9 @@ const useHomeStore = create<HomeState>((set, get) => ({
         contentData: [],
         pageStart: 0,
         hasMore: true,
-        error: null
+        error: null,
+        loading: true,
       });
-
-      if (category.type === 'record') {
-        get().fetchInitialData();
-        return;
-      }
 
       const cachedData = dataCache.get(cacheKey);
       if (cachedData && isValidCache(cachedData)) {
@@ -383,68 +387,7 @@ const useHomeStore = create<HomeState>((set, get) => ({
   },
 
   refreshPlayRecords: async () => {
-    const { apiBaseUrl } = useSettingsStore.getState();
-    await useAuthStore.getState().checkLoginStatus(apiBaseUrl);
-    const { isLoggedIn } = useAuthStore.getState();
-    if (!isLoggedIn) {
-      set((state) => {
-        const hasUserCategories = state.categories.some(
-          (c) => c.type === "record" || c.type === "douban-mine"
-        );
-        if (hasUserCategories) {
-          const newCategories = state.categories.filter(
-            (c) => c.type !== "record" && c.type !== "douban-mine"
-          );
-          if (state.selectedCategory.type === "record" || state.selectedCategory.type === "douban-mine") {
-            get().selectCategory(newCategories[0] || null);
-          }
-          return { categories: newCategories };
-        }
-        return {};
-      });
-      return;
-    }
-    const records = await PlayRecordManager.getAll();
-    const hasRecords = Object.keys(records).length > 0;
-    set((state) => {
-      const hasUserCategories = state.categories.some(
-        (c) => c.type === "record" || c.type === "douban-mine"
-      );
-
-      if (hasRecords) {
-        const otherCategories = state.categories.filter(
-          (c) => c.type !== "record" && c.type !== "douban-mine"
-        );
-        const newCategories = [...doubanMineCategories, recordCategory, ...otherCategories];
-
-        if (!hasUserCategories || newCategories.length !== state.categories.length) {
-          return { categories: newCategories };
-        }
-
-        // 如果顺序不同也进行更新
-        const isSameOrder =
-          state.categories.length === newCategories.length &&
-          state.categories.every((c, index) => c.title === newCategories[index].title);
-
-        if (!isSameOrder) {
-          return { categories: newCategories };
-        }
-
-        return {};
-      } else if (!hasRecords && hasUserCategories) {
-        const newCategories = state.categories.filter(
-          (c) => c.type !== "record" && c.type !== "douban-mine"
-        );
-        if (state.selectedCategory.type === "record" || state.selectedCategory.type === "douban-mine") {
-          get().selectCategory(newCategories[0] || null);
-        }
-        return { categories: newCategories };
-      }
-
-      return {};
-    });
-
-    get().fetchInitialData();
+    await get().fetchInitialData();
   },
 
   clearError: () => {

@@ -186,6 +186,11 @@ export default function HomeScreen() {
     return <ActivityIndicator style={{ marginVertical: 20 }} size="large" />;
   };
 
+  const emptyMessage =
+    selectedCategory?.tags && !selectedCategory?.tag
+      ? "请选择一个子分类"
+      : "该分类下暂无内容";
+
   // 检查是否需要显示API配置提示
   const shouldShowApiConfig = apiConfigStatus.needsConfiguration && selectedCategory && !selectedCategory.tags;
 
@@ -364,7 +369,7 @@ export default function HomeScreen() {
             error={error}
             onEndReached={loadMoreData}
             loadMoreThreshold={LOAD_MORE_THRESHOLD}
-            emptyMessage={selectedCategory?.tags ? "请选择一个子分类" : "该分类下暂无内容"}
+            emptyMessage={emptyMessage}
             ListFooterComponent={renderFooter}
           />
         </Animated.View>
