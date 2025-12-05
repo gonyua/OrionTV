@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import { api, SearchResult, PlayRecord } from "@/services/api";
+import { api, SearchResult, PlayRecord, DoubanMineItem } from "@/services/api";
 import { PlayRecordManager } from "@/services/storage";
 import useAuthStore from "./authStore";
 import { useSettingsStore } from "./settingsStore";
 
-export type RowItem = (SearchResult | PlayRecord) & {
+export type RowItem = (SearchResult | PlayRecord | DoubanMineItem) & {
   id: string;
   source: string;
   title: string;
@@ -21,13 +21,22 @@ export type RowItem = (SearchResult | PlayRecord) & {
 
 export interface Category {
   title: string;
-  type?: "movie" | "tv" | "record";
+  type?: "movie" | "tv" | "record" | "douban-mine";
   tag?: string;
   tags?: string[];
+  doubanStatus?: "wish" | "do" | "collect";
 }
 
+const recordCategory: Category = { title: "最近播放", type: "record" };
+
+const doubanMineCategories: Category[] = [
+  { title: "在看", type: "douban-mine", doubanStatus: "do" },
+  { title: "想看", type: "douban-mine", doubanStatus: "wish" },
+  { title: "看过", type: "douban-mine", doubanStatus: "collect" },
+];
+
 const initialCategories: Category[] = [
-  { title: "最近播放", type: "record" },
+  recordCategory,
   { title: "热门剧集", type: "tv", tag: "热门" },
   { title: "电视剧", type: "tv", tags: ["国产剧", "美剧", "英剧", "韩剧", "日剧", "港剧", "日本动画", "动画"] },
   {
@@ -171,7 +180,72 @@ const useHomeStore = create<HomeState>((set, get) => ({
           .sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
 
         set({ contentData: rowItems, hasMore: false });
-      } else if (selectedCategory.type && selectedCategory.tag) {
+      } else if (selectedCategory.type === "douban-mine" && selectedCategory.doubanStatus) {
+        const result = await api.getDoubanMine(selectedCategory.doubanStatus, pageStart);
+
+        const newItems = result.list.map((item) => ({
+          ...item,
+          id: item.title,
+          source: "douban",
+        })) as RowItem[];
+
+        const cacheKey = getCacheKey(selectedCategory);
+
+        if (pageStart === 0) {
+          // 清理过期缓存
+          for (const [key, value] of dataCache.entries()) {
+            if (!isValidCache(value)) {
+              dataCache.delete(key);
+            }
+          }
+
+          // 如果缓存太大，删除最旧的项
+          if (dataCache.size >= MAX_CACHE_SIZE) {
+            const oldestKey = Array.from(dataCache.keys())[0];
+            dataCache.delete(oldestKey);
+          }
+
+          // 限制缓存的数据条目数，但不限制显示的数据
+          const cacheItems = newItems.slice(0, MAX_ITEMS_PER_CACHE);
+
+          // 存储新缓存
+          dataCache.set(cacheKey, {
+            data: cacheItems,
+            timestamp: Date.now(),
+            type: "tv",
+            hasMore: true,
+          });
+
+          set({
+            contentData: newItems,
+            pageStart: newItems.length,
+            hasMore: result.hasMore ?? result.list.length !== 0,
+          });
+        } else {
+          const existingCache = dataCache.get(cacheKey);
+          if (existingCache) {
+            if (existingCache.data.length < MAX_ITEMS_PER_CACHE) {
+              const updatedData = [...existingCache.data, ...newItems];
+              const limitedCacheData = updatedData.slice(0, MAX_ITEMS_PER_CACHE);
+
+              dataCache.set(cacheKey, {
+                ...existingCache,
+                data: limitedCacheData,
+                hasMore: true,
+              });
+            }
+          }
+
+          set((state) => ({
+            contentData: [...state.contentData, ...newItems],
+            pageStart: state.pageStart + newItems.length,
+            hasMore: result.hasMore ?? result.list.length !== 0,
+          }));
+        }
+      } else if (
+        (selectedCategory.type === "movie" || selectedCategory.type === "tv") &&
+        selectedCategory.tag
+      ) {
         const result = await api.getDoubanData(
           selectedCategory.type,
           selectedCategory.tag,
@@ -314,10 +388,14 @@ const useHomeStore = create<HomeState>((set, get) => ({
     const { isLoggedIn } = useAuthStore.getState();
     if (!isLoggedIn) {
       set((state) => {
-        const recordCategoryExists = state.categories.some((c) => c.type === "record");
-        if (recordCategoryExists) {
-          const newCategories = state.categories.filter((c) => c.type !== "record");
-          if (state.selectedCategory.type === "record") {
+        const hasUserCategories = state.categories.some(
+          (c) => c.type === "record" || c.type === "douban-mine"
+        );
+        if (hasUserCategories) {
+          const newCategories = state.categories.filter(
+            (c) => c.type !== "record" && c.type !== "douban-mine"
+          );
+          if (state.selectedCategory.type === "record" || state.selectedCategory.type === "douban-mine") {
             get().selectCategory(newCategories[0] || null);
           }
           return { categories: newCategories };
@@ -329,17 +407,40 @@ const useHomeStore = create<HomeState>((set, get) => ({
     const records = await PlayRecordManager.getAll();
     const hasRecords = Object.keys(records).length > 0;
     set((state) => {
-      const recordCategoryExists = state.categories.some((c) => c.type === "record");
-      if (hasRecords && !recordCategoryExists) {
-        return { categories: [initialCategories[0], ...state.categories] };
-      }
-      if (!hasRecords && recordCategoryExists) {
-        const newCategories = state.categories.filter((c) => c.type !== "record");
-        if (state.selectedCategory.type === "record") {
+      const hasUserCategories = state.categories.some(
+        (c) => c.type === "record" || c.type === "douban-mine"
+      );
+
+      if (hasRecords) {
+        const otherCategories = state.categories.filter(
+          (c) => c.type !== "record" && c.type !== "douban-mine"
+        );
+        const newCategories = [...doubanMineCategories, recordCategory, ...otherCategories];
+
+        if (!hasUserCategories || newCategories.length !== state.categories.length) {
+          return { categories: newCategories };
+        }
+
+        // 如果顺序不同也进行更新
+        const isSameOrder =
+          state.categories.length === newCategories.length &&
+          state.categories.every((c, index) => c.title === newCategories[index].title);
+
+        if (!isSameOrder) {
+          return { categories: newCategories };
+        }
+
+        return {};
+      } else if (!hasRecords && hasUserCategories) {
+        const newCategories = state.categories.filter(
+          (c) => c.type !== "record" && c.type !== "douban-mine"
+        );
+        if (state.selectedCategory.type === "record" || state.selectedCategory.type === "douban-mine") {
           get().selectCategory(newCategories[0] || null);
         }
         return { categories: newCategories };
       }
+
       return {};
     });
 
