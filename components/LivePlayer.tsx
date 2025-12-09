@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { View, StyleSheet, Text, ActivityIndicator } from "react-native";
+import { Colors } from "@/constants/Colors";
 import { Video, ResizeMode, AVPlaybackStatus } from "expo-av";
 import { useKeepAwake } from "expo-keep-awake";
 
@@ -99,7 +100,7 @@ export default function LivePlayer({ streamUrl, channelTitle, onPlaybackStatusUp
       />
       {isLoading && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color={Colors.dark.primary} />
           <Text style={styles.messageText}>加载中...</Text>
         </View>
       )}

@@ -7,6 +7,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import useHomeStore from "@/stores/homeStore";
 import { api } from "@/services/api";
 import { LoginCredentialsManager } from "@/services/storage";
+import { Colors } from "@/constants/Colors";
 import { ThemedView } from "./ThemedView";
 import { ThemedText } from "./ThemedText";
 import { StyledButton } from "./StyledButton";
@@ -179,7 +180,7 @@ const LoginModal = () => {
             style={styles.button}
             hasTVPreferredFocus={!serverConfig || serverConfig.StorageType === "localstorage"}
           >
-            {isLoading && <ActivityIndicator color="#fff" />}
+            {isLoading && <ActivityIndicator color={Colors.dark.primary} />}
           </StyledButton>
         </ThemedView>
       </View>

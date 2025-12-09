@@ -209,7 +209,7 @@ const VideoLoadingAnimation: React.FC<VideoLoadingAnimationProps> = ({ showProgr
           <View style={styles.progressBar}>
             <Animated.View style={[styles.progressFill, animatedStyles.progress]}>
               <LinearGradient
-                colors={["#00bb5e", "#feff5f"]}
+                colors={["#feff5f", "#f96518"]}
                 style={StyleSheet.absoluteFill}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}

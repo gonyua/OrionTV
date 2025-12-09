@@ -1,5 +1,6 @@
 import React from "react";
 import { View, StyleSheet, ActivityIndicator } from "react-native";
+import { Colors } from "@/constants/Colors";
 
 interface LoadingOverlayProps {
   visible: boolean;
@@ -12,7 +13,7 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ visible }) => {
 
   return (
     <View style={styles.loadingOverlay}>
-      <ActivityIndicator size="large" color="#fff" />
+      <ActivityIndicator size="large" color={Colors.dark.primary} />
     </View>
   );
 };

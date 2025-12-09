@@ -63,6 +63,10 @@ const initialCategories: Category[] = [
   },
   { title: "综艺", type: "tv", tag: "综艺" },
   { title: "豆瓣 Top250", type: "movie", tag: "top250" },
+  { title: "全球榜" },
+  { title: "中国榜" },
+  // “我的电视”模块，点击后跳转到专用页面
+  { title: "我的电视" },
 ];
 
 const defaultSelectedCategory =
@@ -359,13 +363,14 @@ const useHomeStore = create<HomeState>((set, get) => ({
     const cacheKey = getCacheKey(category);
 
     if (currentCategory.title !== category.title || currentCategory.tag !== category.tag) {
+      const isBoxOfficeCategory = category.title === "全球榜" || category.title === "中国榜";
       set({
         selectedCategory: category,
         contentData: [],
         pageStart: 0,
         hasMore: true,
         error: null,
-        loading: true,
+        loading: isBoxOfficeCategory ? false : true,
       });
 
       const cachedData = dataCache.get(cacheKey);

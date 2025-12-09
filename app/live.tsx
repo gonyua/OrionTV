@@ -10,6 +10,7 @@ import { getCommonResponsiveStyles } from "@/utils/ResponsiveStyles";
 import ResponsiveNavigation from "@/components/navigation/ResponsiveNavigation";
 import ResponsiveHeader from "@/components/navigation/ResponsiveHeader";
 import { DeviceUtils } from "@/utils/DeviceUtils";
+import { Colors } from "@/constants/Colors";
 
 export default function LiveScreen() {
   const { m3uUrl } = useSettingsStore();
@@ -139,7 +140,7 @@ export default function LiveScreen() {
               </View>
               <View style={dynamicStyles.channelColumn}>
                 {isLoading ? (
-                  <ActivityIndicator size="large" />
+                  <ActivityIndicator size="large" color={Colors.dark.primary} />
                 ) : (
                   <FlatList
                     data={groupedChannels[selectedGroup] || []}

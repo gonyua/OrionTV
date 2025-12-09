@@ -11,6 +11,7 @@ import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 import { getCommonResponsiveStyles } from "@/utils/ResponsiveStyles";
 import ResponsiveNavigation from "@/components/navigation/ResponsiveNavigation";
 import ResponsiveHeader from "@/components/navigation/ResponsiveHeader";
+import { Colors } from "@/constants/Colors";
 
 export default function DetailScreen() {
   const { q, source, id } = useLocalSearchParams<{ q: string; source?: string; id?: string }>();
@@ -142,7 +143,9 @@ export default function DetailScreen() {
           <View style={dynamicStyles.sourcesContainer}>
             <View style={dynamicStyles.sourcesTitleContainer}>
               <ThemedText style={dynamicStyles.sourcesTitle}>播放源 ({searchResults.length})</ThemedText>
-              {!allSourcesLoaded && <ActivityIndicator style={{ marginLeft: 10 }} />}
+              {!allSourcesLoaded && (
+                <ActivityIndicator style={{ marginLeft: 10 }} color={Colors.dark.primary} />
+              )}
             </View>
             <View style={dynamicStyles.sourceList}>
               {searchResults.map((item, index) => {
@@ -224,7 +227,9 @@ export default function DetailScreen() {
             <View style={dynamicStyles.sourcesContainer}>
               <View style={dynamicStyles.sourcesTitleContainer}>
                 <ThemedText style={dynamicStyles.sourcesTitle}>选择播放源 共 {searchResults.length} 个</ThemedText>
-                {!allSourcesLoaded && <ActivityIndicator style={{ marginLeft: 10 }} />}
+                {!allSourcesLoaded && (
+                  <ActivityIndicator style={{ marginLeft: 10 }} color={Colors.dark.primary} />
+                )}
               </View>
               <View style={dynamicStyles.sourceList}>
                 {searchResults.map((item, index) => {

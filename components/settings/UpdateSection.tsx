@@ -3,6 +3,7 @@ import { View, StyleSheet, Platform, ActivityIndicator } from "react-native";
 import { ThemedText } from "../ThemedText";
 import { StyledButton } from "../StyledButton";
 import { useUpdateStore } from "@/stores/updateStore";
+import { Colors } from "@/constants/Colors";
 // import { UPDATE_CONFIG } from "@/constants/UpdateConfig";
 
 export function UpdateSection() {
@@ -68,7 +69,7 @@ export function UpdateSection() {
       <View style={styles.buttonContainer}>
         <StyledButton onPress={handleCheckUpdate} disabled={checking || downloading} style={styles.button}>
           {checking ? (
-            <ActivityIndicator color="#fff" size="small" />
+            <ActivityIndicator color={Colors.dark.primary} size="small" />
           ) : (
             <ThemedText style={styles.buttonText}>检查更新</ThemedText>
           )}
@@ -115,11 +116,11 @@ const styles = StyleSheet.create({
     fontSize: Platform.isTV ? 18 : 16,
   },
   newVersion: {
-    color: "#00bb5e",
+    color: "#f96518",
     fontWeight: "bold",
   },
   latestVersion: {
-    color: "#00bb5e",
+    color: "#f96518",
     fontWeight: "500",
   },
   errorText: {

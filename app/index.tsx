@@ -16,6 +16,8 @@ import { getCommonResponsiveStyles } from "@/utils/ResponsiveStyles";
 import ResponsiveNavigation from "@/components/navigation/ResponsiveNavigation";
 import { useApiConfig, getApiConfigErrorMessage } from "@/hooks/useApiConfig";
 import { Colors } from "@/constants/Colors";
+import BoxOfficeSidebar from "@/components/BoxOfficeSidebar";
+import { useBoxOfficeRankings } from "@/hooks/useBoxOfficeRankings";
 
 const LOAD_MORE_THRESHOLD = 200;
 
@@ -46,6 +48,12 @@ export default function HomeScreen() {
   } = useHomeStore();
   const { isLoggedIn, logout } = useAuthStore();
   const apiConfigStatus = useApiConfig();
+  const isBoxOfficeCategory =
+    selectedCategory?.title === "全球榜" || selectedCategory?.title === "中国榜";
+  const isGlobalBoxOffice = selectedCategory?.title === "全球榜";
+  const isChinaBoxOffice = selectedCategory?.title === "中国榜";
+  const { globalBoxOffice, chinaBoxOffice, loading: boxOfficeLoading, error: boxOfficeError } =
+    useBoxOfficeRankings(isBoxOfficeCategory);
 
   useFocusEffect(
     useCallback(() => {
@@ -89,6 +97,11 @@ export default function HomeScreen() {
   // 统一的数据获取逻辑
   useEffect(() => {
     if (!selectedCategory) return;
+
+    // 票房榜分类使用单独的获取逻辑，这里不触发首页数据加载
+    if (selectedCategory.title === "全球榜" || selectedCategory.title === "中国榜") {
+      return;
+    }
 
     // 如果是容器分类且没有选择标签，设置默认标签
     if (selectedCategory.tags && !selectedCategory.tag) {
@@ -138,6 +151,10 @@ export default function HomeScreen() {
   }, [loading, contentData.length, fadeAnim]);
 
   const handleCategorySelect = (category: Category) => {
+    if (category.title === "我的电视") {
+      router.push("/my-tv");
+      return;
+    }
     setSelectedTag(null);
     selectCategory(category);
   };
@@ -183,7 +200,7 @@ export default function HomeScreen() {
 
   const renderFooter = () => {
     if (!loadingMore) return null;
-    return <ActivityIndicator style={{ marginVertical: 20 }} size="large" />;
+    return <ActivityIndicator style={{ marginVertical: 20 }} size="large" color={Colors.dark.primary} />;
   };
 
   const emptyMessage =
@@ -208,6 +225,17 @@ export default function HomeScreen() {
           <Pressable android_ripple={Platform.isTV || deviceType !== 'tv'? { color: 'transparent' } : { color: Colors.dark.link }} style={{ marginLeft: 20 }} onPress={() => router.push("/live")}>
             {({ focused }) => (
               <ThemedText style={[dynamicStyles.headerTitle, { color: focused ? "white" : "grey" }]}>直播</ThemedText>
+            )}
+          </Pressable>
+          <Pressable
+            android_ripple={Platform.isTV || deviceType !== 'tv' ? { color: 'transparent' } : { color: Colors.dark.link }}
+            style={{ marginLeft: 20 }}
+            onPress={() => router.push("/my-tv")}
+          >
+            {({ focused }) => (
+              <ThemedText style={[dynamicStyles.headerTitle, { color: focused ? "white" : "grey" }]}>
+                我的电视
+              </ThemedText>
             )}
           </Pressable>
         </View>
@@ -338,7 +366,7 @@ export default function HomeScreen() {
         </View>
       ) : apiConfigStatus.isValidating ? (
         <View style={commonStyles.center}>
-          <ActivityIndicator size="large" />
+          <ActivityIndicator size="large" color={Colors.dark.primary} />
           <ThemedText type="subtitle" style={{ padding: spacing, textAlign: "center" }}>
             正在验证服务器配置...
           </ThemedText>
@@ -349,9 +377,18 @@ export default function HomeScreen() {
             {apiConfigStatus.error}
           </ThemedText>
         </View>
+      ) : isBoxOfficeCategory ? (
+        <View style={dynamicStyles.contentContainer}>
+          <BoxOfficeSidebar
+            globalBoxOffice={isGlobalBoxOffice ? globalBoxOffice : null}
+            chinaBoxOffice={isChinaBoxOffice ? chinaBoxOffice : null}
+            loading={boxOfficeLoading}
+            error={boxOfficeError}
+          />
+        </View>
       ) : loading ? (
         <View style={commonStyles.center}>
-          <ActivityIndicator size="large" />
+          <ActivityIndicator size="large" color={Colors.dark.primary} />
         </View>
       ) : error ? (
         <View style={commonStyles.center}>

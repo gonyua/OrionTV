@@ -3,6 +3,7 @@ import { View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Back
 import { ThemedText } from "@/components/ThemedText";
 import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 import { getCommonResponsiveStyles } from "@/utils/ResponsiveStyles";
+import { Colors } from "@/constants/Colors";
 
 interface CustomScrollViewProps {
   data: any[];
@@ -88,7 +89,13 @@ const CustomScrollView: React.FC<CustomScrollViewProps> = ({
       return null;
     }
     if (loadingMore) {
-      return <ActivityIndicator style={{ marginVertical: 20 }} size="large" />;
+      return (
+        <ActivityIndicator
+          style={{ marginVertical: 20 }}
+          size="large"
+          color={Colors.dark.primary}
+        />
+      );
     }
     return null;
   };
@@ -96,7 +103,7 @@ const CustomScrollView: React.FC<CustomScrollViewProps> = ({
   if (loading) {
     return (
       <View style={commonStyles.center}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={Colors.dark.primary} />
       </View>
     );
   }

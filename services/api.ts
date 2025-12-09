@@ -93,6 +93,32 @@ export interface ServerConfig {
   StorageType: "localstorage" | "redis" | string;
 }
 
+export interface BoxOfficeItem {
+  rank: number;
+  title: string;
+  originalTitle?: string;
+  year?: string;
+  genre?: string;
+  director?: string;
+  region: string;
+  grossWan: number;
+  grossWanText: string;
+  detailUrl?: string;
+  currency?: string;
+  releaseDate?: string;
+  avgPrice?: number;
+  avgPeoplePerShow?: number;
+  movieId?: string;
+}
+
+export interface BoxOfficeResponse {
+  code: number;
+  message: string;
+  yearLabel: string;
+  updateTime: string;
+  list: BoxOfficeItem[];
+}
+
 export class API {
   public baseURL: string = "";
 
@@ -260,6 +286,16 @@ export class API {
   async getVideoDetail(source: string, id: string): Promise<VideoDetail> {
     const url = `/api/detail?source=${source}&id=${id}`;
     const response = await this._fetch(url);
+    return response.json();
+  }
+
+  async getGlobalBoxOffice(): Promise<BoxOfficeResponse> {
+    const response = await this._fetch("/api/boxoffice/global");
+    return response.json();
+  }
+
+  async getChinaBoxOffice(): Promise<BoxOfficeResponse> {
+    const response = await this._fetch("/api/boxoffice/china");
     return response.json();
   }
 }
