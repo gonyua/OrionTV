@@ -13,6 +13,20 @@ export interface DoubanResponse {
   list: DoubanItem[];
 }
 
+export interface DoubanNowPlayingItem {
+  id: string;
+  title: string;
+  poster: string;
+  rate?: string;
+  year?: string;
+}
+
+export interface DoubanNowPlayingResponse {
+  code: number;
+  message: string;
+  list: DoubanNowPlayingItem[];
+}
+
 export interface DoubanMineItem {
   id: string;
   title: string;
@@ -261,6 +275,11 @@ export class API {
   ): Promise<DoubanMineResponse> {
     const url = `/api/douban/mine?status=${status}&start=${start}`;
     const response = await this._fetch(url);
+    return response.json();
+  }
+
+  async getDoubanNowPlaying(): Promise<DoubanNowPlayingResponse> {
+    const response = await this._fetch("/api/douban/nowplaying");
     return response.json();
   }
 

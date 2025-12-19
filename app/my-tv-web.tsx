@@ -1,13 +1,14 @@
-import React, { useRef, useState, useCallback } from "react";
-import { BackHandler, Platform, StyleSheet } from "react-native";
+import React, { useRef, useState, useCallback, useMemo } from "react";
+import { BackHandler, Platform, StyleSheet, useTVEventHandler, HWEvent } from "react-native";
 import { WebView } from "react-native-webview";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { ThemedView } from "@/components/ThemedView";
 import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 import { getCommonResponsiveStyles } from "@/utils/ResponsiveStyles";
+import { CCTV_CHANNELS, findCctvIndexByPid } from "@/constants/CctvChannels";
 
-// 使用 PC 端入口地址，而不是移动/客户端入口
-const YANGSHIPIN_CCTV1_URL = "https://www.yangshipin.cn/tv/home";
+// PC 端入口基础地址
+const YANGSHIPIN_BASE_URL = "https://www.yangshipin.cn/tv/home";
 
 // 模拟桌面浏览器的 User-Agent，强制走 PC 站点逻辑
 const DESKTOP_USER_AGENT =
@@ -20,6 +21,52 @@ export default function MyTvWebScreen() {
 
   const responsiveConfig = useResponsiveLayout();
   const commonStyles = getCommonResponsiveStyles(responsiveConfig);
+  const { deviceType } = responsiveConfig;
+
+  const params = useLocalSearchParams<{ pid?: string }>();
+  const initialPid = useMemo(() => {
+    const pidParam = params.pid;
+    if (Array.isArray(pidParam)) {
+      return pidParam[0];
+    }
+    return pidParam;
+  }, [params.pid]);
+
+  const initialIndex = useMemo(() => {
+    const idx = findCctvIndexByPid(initialPid || undefined);
+    return idx >= 0 ? idx : 0;
+  }, [initialPid]);
+
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+
+  const currentChannel = CCTV_CHANNELS[currentIndex] ?? CCTV_CHANNELS[0];
+  const currentUrl = `${YANGSHIPIN_BASE_URL}?pid=${currentChannel.pid}`;
+
+  const changeChannel = useCallback(
+    (direction: "next" | "prev") => {
+      setCurrentIndex((prev) => {
+        if (direction === "next") {
+          return (prev + 1) % CCTV_CHANNELS.length;
+        }
+        return (prev - 1 + CCTV_CHANNELS.length) % CCTV_CHANNELS.length;
+      });
+    },
+    []
+  );
+
+  const handleTVEvent = useCallback(
+    (event: HWEvent) => {
+      if (deviceType !== "tv") return;
+      if (event.eventType === "up") {
+        changeChannel("prev");
+      } else if (event.eventType === "down") {
+        changeChannel("next");
+      }
+    },
+    [changeChannel, deviceType]
+  );
+
+  useTVEventHandler(deviceType === "tv" ? handleTVEvent : () => { });
 
   useFocusEffect(
     useCallback(() => {
@@ -48,7 +95,7 @@ export default function MyTvWebScreen() {
     <ThemedView style={[commonStyles.container, styles.container]}>
       <WebView
         ref={webViewRef}
-        source={{ uri: YANGSHIPIN_CCTV1_URL }}
+        source={{ uri: currentUrl }}
         style={styles.webview}
         onNavigationStateChange={(navState) => setCanGoBack(navState.canGoBack)}
         userAgent={DESKTOP_USER_AGENT}

@@ -12,6 +12,7 @@ interface AuthState {
   isLoginModalVisible: boolean;
   showLoginModal: () => void;
   hideLoginModal: () => void;
+  requireLogin: () => void;
   checkLoginStatus: (apiBaseUrl?: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -21,6 +22,7 @@ const useAuthStore = create<AuthState>((set) => ({
   isLoginModalVisible: false,
   showLoginModal: () => set({ isLoginModalVisible: true }),
   hideLoginModal: () => set({ isLoginModalVisible: false }),
+  requireLogin: () => set({ isLoggedIn: false, isLoginModalVisible: true }),
   checkLoginStatus: async (apiBaseUrl?: string) => {
     if (!apiBaseUrl) {
       set({ isLoggedIn: false, isLoginModalVisible: false });

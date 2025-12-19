@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import { api, SearchResult, PlayRecord, DoubanMineItem } from "@/services/api";
+import { api, SearchResult, PlayRecord, DoubanMineItem, DoubanNowPlayingItem } from "@/services/api";
 import { PlayRecordManager } from "@/services/storage";
 import useAuthStore from "./authStore";
 import { useSettingsStore } from "./settingsStore";
 
-export type RowItem = (SearchResult | PlayRecord | DoubanMineItem) & {
+export type RowItem = (SearchResult | PlayRecord | DoubanMineItem | DoubanNowPlayingItem) & {
   id: string;
   source: string;
   title: string;
@@ -21,7 +21,7 @@ export type RowItem = (SearchResult | PlayRecord | DoubanMineItem) & {
 
 export interface Category {
   title: string;
-  type?: "movie" | "tv" | "record" | "douban-mine";
+  type?: "movie" | "tv" | "record" | "douban-mine" | "nowplaying";
   tag?: string;
   tags?: string[];
   doubanStatus?: "wish" | "do" | "collect";
@@ -31,13 +31,13 @@ const recordCategory: Category = { title: "最近播放", type: "record" };
 
 const doubanMineCategories: Category[] = [
   { title: "看过", type: "douban-mine", doubanStatus: "collect" },
-  { title: "在看", type: "douban-mine", doubanStatus: "do" },
   { title: "想看", type: "douban-mine", doubanStatus: "wish" },
 ];
 
 const initialCategories: Category[] = [
   ...doubanMineCategories,
   recordCategory,
+  { title: "热门上映", type: "nowplaying" },
   { title: "热门剧集", type: "tv", tag: "热门" },
   { title: "电视剧", type: "tv", tags: ["国产剧", "美剧", "英剧", "韩剧", "日剧", "港剧", "日本动画", "动画"] },
   {
@@ -70,19 +70,20 @@ const initialCategories: Category[] = [
 ];
 
 const defaultSelectedCategory =
-  initialCategories.find((category) => category.title === "热门剧集") || initialCategories[0];
+  initialCategories.find((category) => category.title === "热门上映") || initialCategories[0];
 
 // 添加缓存项接口
 interface CacheItem {
   data: RowItem[];
   timestamp: number;
-  type: 'movie' | 'tv' | 'record';
+  type: "movie" | "tv" | "record" | "nowplaying";
   hasMore: boolean;
 }
 
 const CACHE_EXPIRE_TIME = 5 * 60 * 1000; // 5分钟过期
 const MAX_CACHE_SIZE = 10; // 最大缓存容量
 const MAX_ITEMS_PER_CACHE = 40; // 每个缓存最大条目数
+const UNAUTHORIZED_MESSAGE = "认证失败，请重新登录";
 
 const getCacheKey = (category: Category) => {
   return `${category.type || 'unknown'}-${category.title}-${category.tag || ''}`;
@@ -164,10 +165,11 @@ const useHomeStore = create<HomeState>((set, get) => ({
       if (selectedCategory.type === "record") {
         const { isLoggedIn } = useAuthStore.getState();
         if (!isLoggedIn) {
+          useAuthStore.getState().requireLogin();
           set({
             contentData: [],
             hasMore: false,
-            error: "认证失败，请重新登录",
+            error: UNAUTHORIZED_MESSAGE,
           });
           return;
         }
@@ -254,6 +256,44 @@ const useHomeStore = create<HomeState>((set, get) => ({
             hasMore: result.hasMore ?? result.list.length !== 0,
           }));
         }
+      } else if (selectedCategory.type === "nowplaying") {
+        const result = await api.getDoubanNowPlaying();
+
+        const newItems = result.list.map((item) => ({
+          ...item,
+          id: item.id || item.title,
+          source: "douban",
+        })) as RowItem[];
+
+        const cacheKey = getCacheKey(selectedCategory);
+
+        // 清理过期缓存
+        for (const [key, value] of dataCache.entries()) {
+          if (!isValidCache(value)) {
+            dataCache.delete(key);
+          }
+        }
+
+        // 如果缓存太大，删除最旧的项
+        if (dataCache.size >= MAX_CACHE_SIZE) {
+          const oldestKey = Array.from(dataCache.keys())[0];
+          dataCache.delete(oldestKey);
+        }
+
+        const cacheItems = newItems.slice(0, MAX_ITEMS_PER_CACHE);
+
+        dataCache.set(cacheKey, {
+          data: cacheItems,
+          timestamp: Date.now(),
+          type: "nowplaying",
+          hasMore: false,
+        });
+
+        set({
+          contentData: newItems,
+          pageStart: newItems.length,
+          hasMore: false,
+        });
       } else if (
         (selectedCategory.type === "movie" || selectedCategory.type === "tv") &&
         selectedCategory.tag
@@ -339,7 +379,7 @@ const useHomeStore = create<HomeState>((set, get) => ({
       if (err.message === "API_URL_NOT_SET") {
         errorMessage = "请点击右上角设置按钮，配置您的服务器地址";
       } else if (err.message === "UNAUTHORIZED") {
-        errorMessage = "认证失败，请重新登录";
+        errorMessage = UNAUTHORIZED_MESSAGE;
       } else if (err.message.includes("Network")) {
         errorMessage = "网络连接失败，请检查网络连接";
       } else if (err.message.includes("timeout")) {
@@ -350,6 +390,10 @@ const useHomeStore = create<HomeState>((set, get) => ({
         errorMessage = "服务器内部错误，请联系管理员";
       } else if (err.message.includes("403")) {
         errorMessage = "访问被拒绝，请检查权限设置";
+      }
+
+      if (errorMessage === UNAUTHORIZED_MESSAGE) {
+        useAuthStore.getState().requireLogin();
       }
 
       set({ error: errorMessage });

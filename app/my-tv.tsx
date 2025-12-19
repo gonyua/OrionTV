@@ -6,6 +6,7 @@ import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 import { getCommonResponsiveStyles } from "@/utils/ResponsiveStyles";
 import ResponsiveNavigation from "@/components/navigation/ResponsiveNavigation";
 import ResponsiveHeader from "@/components/navigation/ResponsiveHeader";
+import { CCTV_CHANNELS } from "@/constants/CctvChannels";
 
 export default function MyTvScreen() {
   const router = useRouter();
@@ -13,8 +14,11 @@ export default function MyTvScreen() {
   const commonStyles = getCommonResponsiveStyles(responsiveConfig);
   const { deviceType, spacing } = responsiveConfig;
 
-  const handleOpenWebView = () => {
-    router.push("/my-tv-web");
+  const handleOpenWebView = (pid: string) => {
+    router.push({
+      pathname: "/my-tv-web",
+      params: { pid },
+    });
   };
 
   const dynamicStyles = createStyles(spacing);
@@ -23,21 +27,17 @@ export default function MyTvScreen() {
     <ThemedView style={[commonStyles.container, dynamicStyles.container]}>
 
       <View style={dynamicStyles.channelBar}>
-        {/* <StyledButton
-          text="CCTV1"
-          onPress={handlePlayCctv1}
-          isSelected={currentStreamUrl != null}
-          style={dynamicStyles.channelButton}
-          textStyle={dynamicStyles.channelButtonText}
-        /> */}
-        <StyledButton
-          text="开始"
-          onPress={handleOpenWebView}
-          isSelected={false}
-          hasTVPreferredFocus
-          style={[dynamicStyles.channelButton, dynamicStyles.startButton]}
-          textStyle={dynamicStyles.channelButtonText}
-        />
+        {CCTV_CHANNELS.map((channel, index) => (
+          <StyledButton
+            key={channel.id}
+            text={channel.name}
+            onPress={() => handleOpenWebView(channel.pid)}
+            isSelected={false}
+            hasTVPreferredFocus={deviceType === "tv" && index === 0}
+            style={dynamicStyles.channelButton}
+            textStyle={dynamicStyles.channelButtonText}
+          />
+        ))}
       </View>
     </ThemedView>
   );
@@ -64,20 +64,24 @@ const createStyles = (spacing: number) =>
     },
     channelBar: {
       flexDirection: 'row',
-      justifyContent: 'center',
-      paddingHorizontal: spacing,
-      paddingVertical: spacing / 2,
+      flexWrap: 'wrap',
+      justifyContent: 'flex-start',
+      alignContent: 'flex-start',
+      paddingVertical: spacing * 2,
       backgroundColor: 'rgba(0, 0, 0, 0.8)',
     },
     channelButton: {
-      paddingHorizontal: spacing * 2,
-      paddingVertical: spacing / 2,
+      width: spacing * 20,
+      height: spacing * 6,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: spacing,
+      marginVertical: spacing,
     },
-     startButton: {
-       marginLeft: spacing,
-     },
     channelButtonText: {
-      fontSize: 18,
+      fontSize: 22,
       fontWeight: 'bold',
+      color: '#fff',
+      textAlign: 'left',
     },
   });
