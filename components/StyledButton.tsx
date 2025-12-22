@@ -8,15 +8,16 @@ import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 interface StyledButtonProps extends PressableProps {
   children?: React.ReactNode;
   text?: string;
-  variant?: "default" | "primary" | "ghost";
+  variant?: 'default' | 'primary' | 'ghost';
   isSelected?: boolean;
   style?: StyleProp<ViewStyle>;
+  buttonStyle?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 }
 
 export const StyledButton = forwardRef<View, StyledButtonProps>(
-  ({ children, text, variant = "default", isSelected = false, style, textStyle, ...rest }, ref) => {
-    const colorScheme = "dark";
+  ({ children, text, variant = 'default', isSelected = false, style, buttonStyle, textStyle, ...rest }, ref) => {
+    const colorScheme = 'dark';
     const colors = Colors[colorScheme];
     const [isFocused, setIsFocused] = React.useState(false);
     const animationStyle = useButtonAnimation(isFocused);
@@ -80,7 +81,7 @@ export const StyledButton = forwardRef<View, StyledButtonProps>(
         paddingVertical: 10,
         borderRadius: 8,
         borderWidth: 2,
-        borderColor: "transparent",
+        borderColor: 'transparent',
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
@@ -110,13 +111,14 @@ export const StyledButton = forwardRef<View, StyledButtonProps>(
     return (
       <Animated.View style={[animationStyle, style]}>
         <Pressable
-          android_ripple={Platform.isTV || deviceType !== 'tv'? { color: 'transparent' } : { color: Colors.dark.link }}
+          android_ripple={Platform.isTV || deviceType !== 'tv' ? { color: 'transparent' } : { color: Colors.dark.link }}
           ref={ref}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           style={({ focused }) => [
             styles.button,
             variantStyles[variant].button,
+            buttonStyle,
             isSelected && (variantStyles[variant].selectedButton ?? styles.selectedButton),
             focused && (variantStyles[variant].focusedButton ?? styles.focusedButton),
           ]}

@@ -1,31 +1,30 @@
-import { View, StyleSheet } from "react-native";
-import { useRouter } from "expo-router";
-import { ThemedView } from "@/components/ThemedView";
-import { StyledButton } from "@/components/StyledButton";
-import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
-import { getCommonResponsiveStyles } from "@/utils/ResponsiveStyles";
-import ResponsiveNavigation from "@/components/navigation/ResponsiveNavigation";
-import ResponsiveHeader from "@/components/navigation/ResponsiveHeader";
-import { CCTV_CHANNELS } from "@/constants/CctvChannels";
+import { View, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { ThemedView } from '@/components/ThemedView';
+import { StyledButton } from '@/components/StyledButton';
+import { useResponsiveLayout, DeviceType } from '@/hooks/useResponsiveLayout';
+import { getCommonResponsiveStyles } from '@/utils/ResponsiveStyles';
+import ResponsiveNavigation from '@/components/navigation/ResponsiveNavigation';
+import ResponsiveHeader from '@/components/navigation/ResponsiveHeader';
+import { CCTV_CHANNELS } from '@/constants/CctvChannels';
 
 export default function MyTvScreen() {
   const router = useRouter();
   const responsiveConfig = useResponsiveLayout();
   const commonStyles = getCommonResponsiveStyles(responsiveConfig);
-  const { deviceType, spacing } = responsiveConfig;
+  const { deviceType, spacing, screenWidth } = responsiveConfig;
 
   const handleOpenWebView = (pid: string) => {
     router.push({
-      pathname: "/my-tv-web",
+      pathname: '/my-tv-web',
       params: { pid },
     });
   };
 
-  const dynamicStyles = createStyles(spacing);
+  const dynamicStyles = createStyles(spacing, screenWidth, deviceType);
 
   const content = (
     <ThemedView style={[commonStyles.container, dynamicStyles.container]}>
-
       <View style={dynamicStyles.channelBar}>
         {CCTV_CHANNELS.map((channel, index) => (
           <StyledButton
@@ -33,9 +32,11 @@ export default function MyTvScreen() {
             text={channel.name}
             onPress={() => handleOpenWebView(channel.pid)}
             isSelected={false}
-            hasTVPreferredFocus={deviceType === "tv" && index === 0}
+            hasTVPreferredFocus={deviceType === 'tv' && index === 0}
             style={dynamicStyles.channelButton}
+            buttonStyle={dynamicStyles.channelButtonPressable}
             textStyle={dynamicStyles.channelButtonText}
+            variant='primary'
           />
         ))}
       </View>
@@ -54,8 +55,21 @@ export default function MyTvScreen() {
   );
 }
 
-const createStyles = (spacing: number) =>
-  StyleSheet.create({
+const getButtonMetrics = (deviceType: DeviceType, spacing: number, screenWidth: number) => {
+  const isTv = deviceType === 'tv';
+  const baseWidth = isTv ? 180 : deviceType === 'tablet' ? 160 : 150;
+  const buttonWidth = Math.max(120, Math.min(baseWidth, screenWidth - spacing * 4));
+  const buttonHeight = isTv ? 64 : 52;
+  const gap = isTv ? Math.max(spacing, 12) : Math.max(spacing * 0.75, 10);
+
+  return { buttonWidth, buttonHeight, gap };
+};
+
+const createStyles = (spacing: number, screenWidth: number, deviceType: DeviceType) => {
+  const { buttonWidth, buttonHeight, gap } = getButtonMetrics(deviceType, spacing, screenWidth);
+  const horizontalPadding = deviceType === 'tv' ? spacing * 2 : spacing * 1.5;
+
+  return StyleSheet.create({
     container: {
       flex: 1,
     },
@@ -67,21 +81,32 @@ const createStyles = (spacing: number) =>
       flexWrap: 'wrap',
       justifyContent: 'flex-start',
       alignContent: 'flex-start',
+      paddingHorizontal: horizontalPadding,
       paddingVertical: spacing * 2,
-      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      backgroundColor: 'rgba(12, 14, 18, 0.92)',
+      borderTopWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.06)',
     },
     channelButton: {
-      width: spacing * 20,
-      height: spacing * 6,
-      justifyContent: 'center',
-      alignItems: 'center',
+      marginRight: gap,
+      marginBottom: gap,
+    },
+    channelButtonPressable: {
+      width: buttonWidth,
+      height: buttonHeight,
       paddingHorizontal: spacing,
-      marginVertical: spacing,
+      paddingVertical: 0,
+      borderRadius: deviceType === 'tv' ? 14 : 10,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.16)',
+      backgroundColor: 'rgba(255, 255, 255, 0.08)',
     },
     channelButtonText: {
-      fontSize: 22,
-      fontWeight: 'bold',
-      color: '#fff',
-      textAlign: 'left',
+      fontSize: deviceType === 'tv' ? 20 : 16,
+      fontWeight: '600',
+      color: '#f2f4f7',
+      textAlign: 'center',
+      letterSpacing: 0.3,
     },
   });
+};
