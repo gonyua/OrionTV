@@ -9,6 +9,7 @@ const CONTROLS_TIMEOUT = 5000;
 
 /**
  * 管理播放器控件的显示/隐藏、遥控器事件和自动隐藏定时器。
+ * 支持 TV 遥控器和移动设备触摸交互。
  * @returns onScreenPress - 一个函数，用于处理屏幕点击事件，以显示控件并重置定时器。
  */
 export const useTVRemoteHandler = () => {
@@ -16,6 +17,9 @@ export const useTVRemoteHandler = () => {
 
   const controlsTimer = useRef<NodeJS.Timeout | null>(null);
   const fastForwardIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 检查是否支持 TV 事件（仅当 EXPO_TV=1 时）
+  const isTVPlatform = process.env.EXPO_TV === "1";
 
   // 重置或启动隐藏控件的定时器
   const resetTimer = useCallback(() => {
@@ -60,6 +64,9 @@ export const useTVRemoteHandler = () => {
   // 处理遥控器事件
   const handleTVEvent = useCallback(
     (event: HWEvent) => {
+      // 只在 TV 平台处理事件
+      if (!isTVPlatform) return;
+
       if (showEpisodeModal) {
         return;
       }
@@ -92,7 +99,7 @@ export const useTVRemoteHandler = () => {
         case "longLeft":
           if (!fastForwardIntervalRef.current && event.eventKeyAction === 0) {
             fastForwardIntervalRef.current = setInterval(() => {
-              seek(-SEEK_STEP); 
+              seek(-SEEK_STEP);
             }, 200);
           }
           break;
@@ -103,7 +110,7 @@ export const useTVRemoteHandler = () => {
           // 长按开始: 启动连续快进
           if (!fastForwardIntervalRef.current && event.eventKeyAction === 0) {
             fastForwardIntervalRef.current = setInterval(() => {
-              seek(SEEK_STEP); 
+              seek(SEEK_STEP);
             }, 200);
           }
           break;
@@ -112,10 +119,11 @@ export const useTVRemoteHandler = () => {
           break;
       }
     },
-    [showControls, showEpisodeModal, setShowControls, resetTimer, togglePlayPause, seek]
+    [isTVPlatform, showControls, showEpisodeModal, setShowControls, resetTimer, togglePlayPause, seek]
   );
 
-  useTVEventHandler(handleTVEvent);
+  // 始终调用 Hook，但在 non-TV 平台传入空函数
+  useTVEventHandler(isTVPlatform ? handleTVEvent : () => {});
 
   // 处理屏幕点击事件
   const onScreenPress = () => {

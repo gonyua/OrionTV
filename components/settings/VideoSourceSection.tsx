@@ -5,6 +5,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { SettingsSection } from "./SettingsSection";
 import { useSettingsStore } from "@/stores/settingsStore";
 import useSourceStore, { useSources } from "@/stores/sourceStore";
+import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 
 interface VideoSourceSectionProps {
   onChanged: () => void;
@@ -18,6 +19,7 @@ export const VideoSourceSection: React.FC<VideoSourceSectionProps> = ({ onChange
   const { videoSource } = useSettingsStore();
   const resources = useSources();
   const { toggleResourceEnabled } = useSourceStore();
+  const { deviceType } = useResponsiveLayout();
 
   const handleToggle = useCallback(
     (resourceKey: string) => {
@@ -55,7 +57,8 @@ export const VideoSourceSection: React.FC<VideoSourceSectionProps> = ({ onChange
     [isSectionFocused, focusedIndex, resources, handleToggle]
   );
 
-  useTVEventHandler(handleTVEvent);
+  // 始终调用 Hook，但在 non-TV 平台传入空函数
+  useTVEventHandler(deviceType === "tv" ? handleTVEvent : () => {});
 
   const renderResourceItem = ({ item, index }: { item: { source: string; source_name: string }; index: number }) => {
     const isEnabled = videoSource.enabledAll || videoSource.sources[item.source];

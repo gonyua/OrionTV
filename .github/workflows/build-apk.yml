@@ -39,10 +39,10 @@ jobs:
           java-version: "17"
 
       - name: Prebuild TV App
-        run: yarn prebuild
+        run: yarn prebuild-tv
 
       - name: Build TV APK
-        run: yarn build
+        run: yarn build-tv
 
       - name: Rename APK file
         run: |

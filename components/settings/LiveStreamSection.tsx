@@ -66,7 +66,8 @@ export const LiveStreamSection = forwardRef<LiveStreamSectionRef, LiveStreamSect
       [isSectionFocused]
     );
 
-    useTVEventHandler(handleTVEvent);
+    // 始终调用 Hook，但在 non-TV 平台传入空函数
+    useTVEventHandler(deviceType === "tv" ? handleTVEvent : () => {});
 
 
         const [selection, setSelection] = useState<{ start: number; end: number }>({
