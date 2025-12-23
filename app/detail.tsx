@@ -139,6 +139,22 @@ export default function DetailScreen() {
             <ThemedText style={dynamicStyles.description}>{detail.desc}</ThemedText>
           </View>
 
+          {/* 剧集列表 */}
+          <View style={dynamicStyles.episodesContainer}>
+            <ThemedText style={dynamicStyles.episodesTitle}>播放列表</ThemedText>
+            <View style={dynamicStyles.episodeList}>
+              {detail.episodes.map((episode, index) => (
+                <StyledButton
+                  key={index}
+                  style={dynamicStyles.episodeButton}
+                  onPress={() => handlePlay(index)}
+                  text={`第 ${index + 1} 集`}
+                  textStyle={dynamicStyles.episodeButtonText}
+                />
+              ))}
+            </View>
+          </View>
+
           {/* 播放源 */}
           <View style={dynamicStyles.sourcesContainer}>
             <View style={dynamicStyles.sourcesTitleContainer}>
@@ -175,22 +191,6 @@ export default function DetailScreen() {
               })}
             </View>
           </View>
-
-          {/* 剧集列表 */}
-          <View style={dynamicStyles.episodesContainer}>
-            <ThemedText style={dynamicStyles.episodesTitle}>播放列表</ThemedText>
-            <View style={dynamicStyles.episodeList}>
-              {detail.episodes.map((episode, index) => (
-                <StyledButton
-                  key={index}
-                  style={dynamicStyles.episodeButton}
-                  onPress={() => handlePlay(index)}
-                  text={`第 ${index + 1} 集`}
-                  textStyle={dynamicStyles.episodeButtonText}
-                />
-              ))}
-            </View>
-          </View>
         </ScrollView>
       );
     } else {
@@ -224,6 +224,21 @@ export default function DetailScreen() {
           </View>
 
           <View style={dynamicStyles.bottomContainer}>
+            <View style={dynamicStyles.episodesContainer}>
+              <ThemedText style={dynamicStyles.episodesTitle}>播放列表</ThemedText>
+              <ScrollView contentContainerStyle={dynamicStyles.episodeList}>
+                {detail.episodes.map((episode, index) => (
+                  <StyledButton
+                    key={index}
+                    style={dynamicStyles.episodeButton}
+                    onPress={() => handlePlay(index)}
+                    hasTVPreferredFocus={index === 0}
+                    text={`第 ${index + 1} 集`}
+                    textStyle={dynamicStyles.episodeButtonText}
+                  />
+                ))}
+              </ScrollView>
+            </View>
             <View style={dynamicStyles.sourcesContainer}>
               <View style={dynamicStyles.sourcesTitleContainer}>
                 <ThemedText style={dynamicStyles.sourcesTitle}>选择播放源 共 {searchResults.length} 个</ThemedText>
@@ -238,7 +253,6 @@ export default function DetailScreen() {
                     <StyledButton
                       key={index}
                       onPress={() => setDetail(item)}
-                      hasTVPreferredFocus={index === 0}
                       isSelected={isSelected}
                       style={dynamicStyles.sourceButton}
                     >
@@ -259,20 +273,6 @@ export default function DetailScreen() {
                   );
                 })}
               </View>
-            </View>
-            <View style={dynamicStyles.episodesContainer}>
-              <ThemedText style={dynamicStyles.episodesTitle}>播放列表</ThemedText>
-              <ScrollView contentContainerStyle={dynamicStyles.episodeList}>
-                {detail.episodes.map((episode, index) => (
-                  <StyledButton
-                    key={index}
-                    style={dynamicStyles.episodeButton}
-                    onPress={() => handlePlay(index)}
-                    text={`第 ${index + 1} 集`}
-                    textStyle={dynamicStyles.episodeButtonText}
-                  />
-                ))}
-              </ScrollView>
             </View>
           </View>
         </ScrollView>

@@ -3,7 +3,7 @@ import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { Platform, View, StyleSheet } from "react-native";
+import { Platform, View, StyleSheet, Image } from "react-native";
 import Toast from "react-native-toast-message";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -77,7 +77,11 @@ export default function RootLayout() {
   }, [remoteInputEnabled, startServer, stopServer, responsiveConfig.deviceType]);
 
   if (!loaded && !error) {
-    return null;
+    return (
+      <View style={styles.splashContainer}>
+        <Image source={require("../assets/images/icon.png")} style={styles.splashIcon} />
+      </View>
+    );
   }
 
   return (
@@ -108,5 +112,16 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  splashContainer: {
+    flex: 1,
+    backgroundColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  splashIcon: {
+    width: 160,
+    height: 160,
+    resizeMode: "contain",
   },
 });

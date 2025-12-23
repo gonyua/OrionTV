@@ -171,6 +171,7 @@ export default function HomeScreen() {
     const isSelected = selectedCategory?.title === item.title;
     return (
       <StyledButton
+        hasTVPreferredFocus={deviceType === "tv" && isSelected}
         text={item.title}
         onPress={() => handleCategorySelect(item)}
         isSelected={isSelected}
