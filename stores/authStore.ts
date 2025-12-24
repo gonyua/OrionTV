@@ -55,9 +55,12 @@ const useAuthStore = create<AuthState>((set) => ({
 
       const refreshedState = useSettingsStore.getState();
       serverConfig = refreshedState.serverConfig;
+      const serverConfigError = refreshedState.serverConfigError;
 
       if (!serverConfig?.StorageType) {
-        Toast.show({ type: "error", text1: "请检查网络或者服务器地址是否可用" });
+        if (serverConfigError) {
+          Toast.show({ type: 'error', text1: '请检查网络或者服务器地址是否可用' });
+        }
         return;
       }
 

@@ -55,8 +55,7 @@ export const RemoteInputSection: React.FC<RemoteInputSectionProps> = ({ onChange
     [isFocused, remoteInputEnabled, handleToggle]
   );
 
-  // 始终调用 Hook，但在 non-TV 平台传入空函数
-  useTVEventHandler(deviceType === "tv" ? handleTVEvent : () => {});
+  useTVEventHandler(handleTVEvent);
 
   return (
     <SettingsSection focusable onFocus={handleSectionFocus} onBlur={handleSectionBlur}

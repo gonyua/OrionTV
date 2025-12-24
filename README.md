@@ -104,3 +104,99 @@ OrionTV 仅作为视频搜索工具，不存储、上传或分发任何视频内
 感谢以下项目提供 API Key 的赞助
 
 - [gpt-load](https://github.com/tbphp/gpt-load) - 一个高性能的 OpenAI 格式 API 多密钥轮询代理服务器，支持负载均衡，使用 Go 语言开发
+
+• 是否为tv 平板 手机 是运行时取的，但有两种“来源”，不一样：
+
+  1. deviceType（来自 useResponsiveLayout）
+
+  - 运行时用 Dimensions.get('window') 拿屏幕宽高 + Platform.isTV。
+  - 逻辑是：Platform.isTV 为真就当 TV，否则按宽度分 mobile/tablet/tv。
+  - 所以它是根据屏幕尺寸推断，大屏平板/横屏 Web 也可能被判成 tv。
+
+  2. isTVPlatform（process.env.EXPO_TV === "1"）
+
+  - 这是构建/启动时写死的环境变量，不是设备实时检测。
+  - 你在脚本里 EXPO_TV=1，它就认为是 TV 平台。
+
+  简单说：
+
+  - deviceType 是运行时根据屏幕“推断”。
+  - EXPO_TV 是启动参数“声明”。
+    如果你想严格区分真 TV，Platform.isTV 更靠谱；如果想靠屏幕大小做响应式，就用 deviceType。
+
+
+  - Platform.isTV：React Native 的原生平台判断，只有真正的 tvOS / Android TV 才为 true。用来判断“是否真的 TV 设备”最靠谱。
+  - deviceType：useResponsiveLayout 按屏幕宽度推断出来的类型（mobile/tablet/tv）。大屏平板、Web 全屏也可能被判成 tv，用于布局响应式，不保证是真的 TV。
+  - isTVPlatform（process.env.EXPO_TV === '1'）：启动/构建时的开关，脚本里手动设定。用于“强制以 TV 模式运行”或控制 TV 相关逻辑，但不是设备检测。
+
+  ⚠️ 重要警告 2（切换 TV / 非 TV 构建）
+
+如果你：
+	•	已生成 手机端原生目录
+	•	又切换 EXPO_TV=true 或 isTV=true
+	•	或反向从 TV 切回手机构建
+
+👉 再次运行 npx expo prebuild 很容易导致 CocoaPods 错误
+npx expo prebuild --clean’
+官方说明：
+https://docs.expo.dev/workflow/prebuild/#clean
+
+⸻
+
+Apple TV：React Native TV 是官方支持的；Expo 不是官方支持，但可以“有限使用”。
+
+
+• 简单说：EXPO_TV=1 只在 生成原生工程（expo prebuild）时起作用。
+- 不加 EXPO_TV=1：生成的是手机工程（Android phone / iOS）。
+- 加了 EXPO_TV=1：生成的是TV 工程（Android TV / tvOS），会把原生配置改成 TV 需要的样子。
+“改成 TV 形态”具体包括：
+- Android：写入 Android TV 的 manifest 配置、TV banner 图、leanback 相关配置。
+- iOS：写入 tvOS 的工程配置、Apple TV 的图标/Top Shelf 资源。
+  这就像 Android 里：
+  - 普通 build → 用手机的 AndroidManifest.xml
+  - TV build → 用一套 TV 的 manifest + 资源
+
+• 原理很简单：Expo 在 prebuild 时会执行“配置插件”，插件会直接读写原生工程文件。
+  高层流程：
+  1. expo prebuild 生成一套默认原生工程（android/、ios/）。
+  2. 然后执行 app.json 里的每个 plugin。
+  3. plugin 会用脚本去修改工程文件（Manifest、Gradle、Xcode 工程、资源文件等）。
+  4. @react-native-tvos/config-tv 就是其中一个，它会根据 EXPO_TV 决定要不要改成 TV 配置。
+  所以本质是：
+  expo prebuild = 生成原生工程 + 运行一堆“自动改工程”的脚本。
+  EXPO_TV=1 只是让这一个插件走“TV 改造”分支。
+
+  • 在 node_modules 里，就是一个 Expo config plugin，不是 shell 脚本。入口和执行位置如下：
+
+  - 插件入口：node_modules/@react-native-tvos/config-tv/app.plugin.js
+    里面只是 require('./build/withTV')。
+  - 核心逻辑：node_modules/@react-native-tvos/config-tv/build/withTV.js
+    会根据开关决定是否执行 TV 改造。
+  - 读取 EXPO_TV 的位置：node_modules/@react-native-tvos/config-tv/build/utils/config.js
+    isTVEnabled() 里用 getenv('EXPO_TV') 判断。
+
+  TV 改造具体脚本就是这些文件（被 withTV.js 调用）：
+
+  - node_modules/@react-native-tvos/config-tv/build/withTVAndroidManifest.js
+  - node_modules/@react-native-tvos/config-tv/build/withTVAndroidBannerImage.js
+  - node_modules/@react-native-tvos/config-tv/build/withTVXcodeProject.js
+  - node_modules/@react-native-tvos/config-tv/build/withTVInfoPlist.js
+  - node_modules/@react-native-tvos/config-tv/build/withTVPodfile.js
+  - node_modules/@react-native-tvos/config-tv/build/withTVAppleIconImages.js
+
+  所以结论是：
+  expo prebuild → 执行这些 JS 脚本 → 直接改 android/、ios/ 里的原生工程文件。
+  EXPO_TV=1 就是让它走“TV 改造分支”。
+
+  你贴的那段其实是 withTVXcodeProject.d.ts（类型声明文件），不是执行逻辑本身。
+  它只是说明：这个模块的函数类型来自 expo/config-plugins。
+
+  真正执行逻辑在：
+
+  - node_modules/@react-native-tvos/config-tv/build/withTVXcodeProject.js
+
+  里面会 require('expo/config-plugins')，用 Expo 提供的 API 去修改 Xcode 工程文件（比如 build settings、目标平台等）。
+
+  所以结论是：
+  是的，这个插件就是基于 expo/config-plugins 的 API 来修改原生工程的。
+  如果你想看实际怎么改，我可以打开 withTVXcodeProject.js 给你看关键片段。

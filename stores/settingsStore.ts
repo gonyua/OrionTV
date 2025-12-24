@@ -19,6 +19,7 @@ interface SettingsState {
   };
   isModalVisible: boolean;
   serverConfig: ServerConfig | null;
+  serverConfigError: string | null;
   isLoadingServerConfig: boolean;
   loadSettings: () => Promise<void>;
   fetchServerConfig: () => Promise<void>;
@@ -38,6 +39,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   remoteInputEnabled: false,
   isModalVisible: false,
   serverConfig: null,
+  serverConfigError: null,
   isLoadingServerConfig: false,
   videoSource: {
     enabledAll: true,
@@ -60,15 +62,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
   fetchServerConfig: async () => {
-    set({ isLoadingServerConfig: true });
+    set({ isLoadingServerConfig: true, serverConfigError: null });
     try {
       const config = await api.getServerConfig();
-      if (config) {
+      if (config?.StorageType) {
         storageConfig.setStorageType(config.StorageType);
         set({ serverConfig: config });
+        return;
       }
+      logger.error('Invalid server config response:', config);
+      set({ serverConfig: null, serverConfigError: 'INVALID_SERVER_CONFIG' });
     } catch (error) {
-      set({ serverConfig: null });
+      set({
+        serverConfig: null,
+        serverConfigError: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
+      });
       logger.error("Failed to fetch server config:", error);
     } finally {
       set({ isLoadingServerConfig: false });
