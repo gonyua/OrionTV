@@ -200,3 +200,93 @@ Apple TV：React Native TV 是官方支持的；Expo 不是官方支持，但可
   所以结论是：
   是的，这个插件就是基于 expo/config-plugins 的 API 来修改原生工程的。
   如果你想看实际怎么改，我可以打开 withTVXcodeProject.js 给你看关键片段。
+
+   App 启动
+      ↓
+  _layout.tsx (根布局)
+      ↓
+  loadSettings() ← settingsStore.ts
+      ↓
+  读取保存的 apiBaseUrl（服务器地址）
+      ↓
+  fetchServerConfig() ← 获取服务器配置
+      ↓
+  apiBaseUrl 变化触发 checkLoginStatus()
+      ↓
+  根据 serverConfig.StorageType 判断认证方式
+      ↓
+  确定登录状态 → 首页加载数据
+
+  为什么需要这个流程？
+
+  1. apiBaseUrl - 是连接后端服务器的地址，存在 settingsStore 中
+  2. serverConfig - 包含服务器的认证配置（如 StorageType）
+  3. 首页数据 - 需要从服务器获取，必须先确认：
+    - 服务器地址是否有效
+    - 用户是否已登录
+
+  之前的问题
+
+  时序问题：
+  loadSettings() 执行:
+    1. set({ apiBaseUrl })     ← 触发 checkLoginStatus
+    2. fetchServerConfig()      ← 还没开始！
+
+  checkLoginStatus 执行:
+    - serverConfig = null
+    - isLoadingServerConfig = false  ← 误以为加载完成
+    - 显示错误提示！
+
+  修复后
+
+  loadSettings() 执行:
+    1. set({ apiBaseUrl, isLoadingServerConfig: true })  ← 同时设置
+    2. fetchServerConfig()
+
+  checkLoginStatus 执行:
+    - serverConfig = null
+    - isLoadingServerConfig = true  ← 知道正在加载，会等待
+    - 等待加载完成后再判断
+
+  所以 settingsStore 是整个应用初始化的起点，它管理着服务器连接的核心配置。
+
+ settingsStore 存储了服务器地址 (apiBaseUrl)
+
+  启动流程：
+  加载服务器地址 → 获取服务器配置 → 检查登录 → 显示首页
+
+  之前的问题：
+  - 服务器地址加载了，但服务器配置还没获取到
+  - checkLoginStatus 就跑去检查了
+  - 发现配置是空的，以为服务器不可用，就报错了
+
+  修复：让它等配置加载完再检查，不要着急报错。
+
+
+    1. 服务器地址加载 - settingsStore.ts:53-54
+  set({
+    apiBaseUrl: settings.apiBaseUrl,  // ← 这里设置了地址
+    ...
+  });
+
+  2. checkLoginStatus 被触发 - _layout.tsx:44-48
+  useEffect(() => {
+    if (apiBaseUrl) {
+      checkLoginStatus(apiBaseUrl);  // ← apiBaseUrl 一变化就跑来检查
+    }
+  }, [apiBaseUrl, checkLoginStatus]);
+
+  3. 发现配置是空的就报错 - authStore.ts:54-60
+  if (!serverConfig?.StorageType) {  // ← 配置是空的
+    if (!settingsState.isLoadingServerConfig) {  // ← 以为不在加载中
+      Toast.show({ type: "error", text1: "请检查网络或者服务器地址是否可用" });  // ← 报错
+    }
+    return;
+  }
+
+  修复 - settingsStore.ts:61
+  set({
+    apiBaseUrl: settings.apiBaseUrl,
+    ...
+    isLoadingServerConfig: true,  // ← 加了这个，告诉它"我正在加载，别急"
+  });

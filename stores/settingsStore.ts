@@ -47,18 +47,31 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   loadSettings: async () => {
     const settings = await SettingsManager.get();
-    set({
-      apiBaseUrl: settings.apiBaseUrl,
-      m3uUrl: settings.m3uUrl,
-      remoteInputEnabled: settings.remoteInputEnabled || false,
-      videoSource: settings.videoSource || {
-        enabledAll: true,
-        sources: {},
-      },
-    });
     if (settings.apiBaseUrl) {
+      // 设置 apiBaseUrl 时同时标记正在加载 serverConfig，避免时序问题
+      // 否则 checkLoginStatus 可能在 fetchServerConfig 开始前就执行，导致误报错误
+      set({
+        apiBaseUrl: settings.apiBaseUrl,
+        m3uUrl: settings.m3uUrl,
+        remoteInputEnabled: settings.remoteInputEnabled || false,
+        videoSource: settings.videoSource || {
+          enabledAll: true,
+          sources: {},
+        },
+        isLoadingServerConfig: true,
+      });
       api.setBaseUrl(settings.apiBaseUrl);
       await get().fetchServerConfig();
+    } else {
+      set({
+        apiBaseUrl: settings.apiBaseUrl,
+        m3uUrl: settings.m3uUrl,
+        remoteInputEnabled: settings.remoteInputEnabled || false,
+        videoSource: settings.videoSource || {
+          enabledAll: true,
+          sources: {},
+        },
+      });
     }
   },
   fetchServerConfig: async () => {

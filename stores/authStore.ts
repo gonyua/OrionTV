@@ -23,7 +23,7 @@ const useAuthStore = create<AuthState>((set) => ({
   showLoginModal: () => set({ isLoginModalVisible: true }),
   hideLoginModal: () => set({ isLoginModalVisible: false }),
   requireLogin: () => set({ isLoggedIn: false, isLoginModalVisible: true }),
-  checkLoginStatus: async (apiBaseUrl?: string) => {
+ checkLoginStatus: async (apiBaseUrl?: string) => {
     if (!apiBaseUrl) {
       set({ isLoggedIn: false, isLoginModalVisible: false });
       return;
@@ -49,17 +49,12 @@ const useAuthStore = create<AuthState>((set) => ({
             break;
           }
         }
-      } else if (!serverConfig?.StorageType) {
-        await settingsState.fetchServerConfig();
       }
 
-      const refreshedState = useSettingsStore.getState();
-      serverConfig = refreshedState.serverConfig;
-      const serverConfigError = refreshedState.serverConfigError;
-
       if (!serverConfig?.StorageType) {
-        if (serverConfigError) {
-          Toast.show({ type: 'error', text1: '请检查网络或者服务器地址是否可用' });
+        // Only show error if we're not loading and have tried to fetch the config
+        if (!settingsState.isLoadingServerConfig) {
+          Toast.show({ type: "error", text1: "请检查网络或者服务器地址是否可用" });
         }
         return;
       }

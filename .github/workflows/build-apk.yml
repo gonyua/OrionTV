@@ -30,7 +30,7 @@ jobs:
 
       - name: Get version from package.json
         id: package-version
-        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> $GITHUB_OUTPUT
 
       - name: Setup JDK
         uses: actions/setup-java@v3
@@ -47,7 +47,7 @@ jobs:
       - name: Archive Mobile APK
         run: |
           mkdir -p artifacts
-          cp android/app/build/outputs/apk/release/app-release.apk artifacts/orionTV.${{ steps.package-version.outputs.version }}.apk
+          cp android/app/build/outputs/apk/release/app-release.apk artifacts/orionTV.${{ steps.package-version.outputs.version }}-mobile.apk
 
       - name: Prebuild TV App
         run: yarn prebuild-tv
@@ -57,7 +57,7 @@ jobs:
 
       - name: Archive TV APK
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk artifacts/orionTV.${{ steps.package-version.outputs.version }}-tv.apk
+          cp android/app/build/outputs/apk/release/app-release.apk artifacts/orionTV.${{ steps.package-version.outputs.version }}.apk
 
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
@@ -72,3 +72,50 @@ jobs:
             artifacts/orionTV.${{ steps.package-version.outputs.version }}-tv.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify WeCom
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          WECOM_WEBHOOK_URL: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=b79fca4a-deca-484a-b1f1-0d4641f7dc13
+          VERSION: ${{ steps.package-version.outputs.version }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -eo pipefail
+
+          version="${VERSION:-unknown}"
+          platform='Android'
+          apk_path="artifacts/orionTV.${version}.apk"
+          apk_tv_path="artifacts/orionTV.${version}-tv.apk"
+          release_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/v${version}"
+          build_time="$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+
+          if [ "${JOB_STATUS}" = 'success' ]; then
+            title='OrionTV 构建完成'
+          else
+            title="OrionTV 构建结束（${JOB_STATUS}）"
+          fi
+
+          payload="$(
+            TITLE="$title" PLATFORM="$platform" APK_PATH="$apk_path" APK_TV_PATH="$apk_tv_path" RELEASE_URL="$release_url" RUN_URL="$RUN_URL" BUILD_TIME="$build_time" \
+            python - <<'PY'
+import json
+import os
+
+content = '\n'.join([
+  os.environ['TITLE'],
+  f"平台: {os.environ['PLATFORM']}",
+  "IPA: N/A",
+  f"Diawi: {os.environ['RELEASE_URL']}",
+  f"APK: {os.environ['APK_PATH']}",
+  f"TV APK: {os.environ['APK_TV_PATH']}",
+  f"流水线: {os.environ['RUN_URL']}",
+  f"时间: {os.environ['BUILD_TIME']}",
+])
+
+print(json.dumps({'msgtype': 'text', 'text': {'content': content}}, ensure_ascii=False))
+PY
+          )"
+
+          curl -sS "$WECOM_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$payload"
