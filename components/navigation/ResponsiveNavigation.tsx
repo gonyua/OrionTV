@@ -1,7 +1,5 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
-import MobileTabContainer from './MobileTabContainer';
 import TabletSidebarNavigator from './TabletSidebarNavigator';
 
 interface ResponsiveNavigationProps {
@@ -13,8 +11,8 @@ const ResponsiveNavigation: React.FC<ResponsiveNavigationProps> = ({ children })
 
   switch (deviceType) {
     case 'mobile':
-      // 移动端使用Tab容器包装children
-      return <MobileTabContainer>{children}</MobileTabContainer>;
+      // 移动端由 `app/(tabs)/_layout.tsx` 的 `<Tabs>` 负责底部导航与保活
+      return <>{children}</>;
     
     case 'tablet':
       return (
@@ -29,14 +27,5 @@ const ResponsiveNavigation: React.FC<ResponsiveNavigationProps> = ({ children })
       return <>{children}</>;
   }
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-  },
-});
 
 export default ResponsiveNavigation;

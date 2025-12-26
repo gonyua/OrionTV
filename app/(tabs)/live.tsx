@@ -178,7 +178,7 @@ export default function LiveScreen() {
 
   return (
     <ResponsiveNavigation>
-      <ResponsiveHeader title="直播" showBackButton />
+      <ResponsiveHeader title="直播" showBackButton={deviceType !== 'mobile'} />
       {content}
     </ResponsiveNavigation>
   );

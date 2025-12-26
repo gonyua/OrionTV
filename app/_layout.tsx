@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { Platform, View, StyleSheet } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import Toast from "react-native-toast-message";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -77,27 +78,25 @@ export default function RootLayout() {
   }, [remoteInputEnabled, startServer, stopServer, responsiveConfig.deviceType]);
 
   return (
-    <SafeAreaProvider>
-      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <View style={styles.container}>
-          <Stack>
-            <Stack.Screen name="index" options={{ headerShown: false }} />
-            <Stack.Screen name="detail" options={{ headerShown: false }} />
-            {Platform.OS !== "web" && <Stack.Screen name="play" options={{ headerShown: false }} />}
-            <Stack.Screen name="search" options={{ headerShown: false }} />
-            <Stack.Screen name="my-tv" options={{ headerShown: false }} />
-            <Stack.Screen name="my-tv-web" options={{ headerShown: false }} />
-            <Stack.Screen name="live" options={{ headerShown: false }} />
-            <Stack.Screen name="settings" options={{ headerShown: false }} />
-            <Stack.Screen name="favorites" options={{ headerShown: false }} />
-            <Stack.Screen name="+not-found" />
-          </Stack>
-        </View>
-        <Toast />
-        <LoginModal />
-        <UpdateModal />
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={styles.container}>
+      <SafeAreaProvider>
+        <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+          <View style={styles.container}>
+            <Stack>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="detail" options={{ headerShown: false }} />
+              {Platform.OS !== "web" && <Stack.Screen name="play" options={{ headerShown: false }} />}
+              <Stack.Screen name="my-tv" options={{ headerShown: false }} />
+              <Stack.Screen name="my-tv-web" options={{ headerShown: false }} />
+              <Stack.Screen name="+not-found" />
+            </Stack>
+          </View>
+          <Toast />
+          <LoginModal />
+          <UpdateModal />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

@@ -325,7 +325,7 @@ export default function SearchScreen() {
 
   return (
     <ResponsiveNavigation>
-      <ResponsiveHeader title="搜索" showBackButton />
+      <ResponsiveHeader title="搜索" showBackButton={deviceType !== 'mobile'} />
       {content}
     </ResponsiveNavigation>
   );

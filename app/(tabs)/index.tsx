@@ -1,5 +1,5 @@
-import React, { useEffect, useCallback, useRef, useState } from "react";
-import { View, StyleSheet, ActivityIndicator, FlatList, Pressable, Animated, StatusBar, Platform, BackHandler, ToastAndroid } from "react-native";
+import React, { useEffect, useCallback, useRef, useState, useMemo } from "react";
+import { View, StyleSheet, ActivityIndicator, FlatList, Pressable, StatusBar, Platform, BackHandler, ToastAndroid } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
@@ -8,7 +8,7 @@ import VideoCard from "@/components/VideoCard";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Search, Settings, LogOut, Heart } from "lucide-react-native";
 import { StyledButton } from "@/components/StyledButton";
-import useHomeStore, { RowItem, Category } from "@/stores/homeStore";
+import useHomeStore, { RowItem, Category, getHomeCategoryKey, CategoryPageState } from "@/stores/homeStore";
 import useAuthStore from "@/stores/authStore";
 import CustomScrollView from "@/components/CustomScrollView";
 import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
@@ -18,14 +18,28 @@ import { useApiConfig, getApiConfigErrorMessage } from "@/hooks/useApiConfig";
 import { Colors } from "@/constants/Colors";
 import BoxOfficeSidebar from "@/components/BoxOfficeSidebar";
 import { useBoxOfficeRankings } from "@/hooks/useBoxOfficeRankings";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, runOnJS } from "react-native-reanimated";
 
 const LOAD_MORE_THRESHOLD = 200;
+const SWIPE_ACTIVATION_X = 15;
+const SWIPE_FAIL_Y = 15;
+const SWIPE_DISTANCE_THRESHOLD_RATIO = 0.25;
+const SWIPE_VELOCITY_THRESHOLD = 800;
+
+const getFallbackPageState = (): CategoryPageState => ({
+  data: [],
+  loading: true,
+  loadingMore: false,
+  pageStart: 0,
+  hasMore: true,
+  error: null,
+});
 
 export default function HomeScreen() {
   const router = useRouter();
   const colorScheme = "dark";
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
   const insets = useSafeAreaInsets();
 
   // 响应式布局配置
@@ -36,10 +50,7 @@ export default function HomeScreen() {
   const {
     categories,
     selectedCategory,
-    contentData,
-    loading,
-    loadingMore,
-    error,
+    pageStates,
     fetchInitialData,
     loadMoreData,
     selectCategory,
@@ -48,12 +59,10 @@ export default function HomeScreen() {
   } = useHomeStore();
   const { isLoggedIn, logout } = useAuthStore();
   const apiConfigStatus = useApiConfig();
-  const isBoxOfficeCategory =
-    selectedCategory?.title === "全球榜" || selectedCategory?.title === "中国榜";
-  const isGlobalBoxOffice = selectedCategory?.title === "全球榜";
-  const isChinaBoxOffice = selectedCategory?.title === "中国榜";
-  const { globalBoxOffice, chinaBoxOffice, loading: boxOfficeLoading, error: boxOfficeError } =
-    useBoxOfficeRankings(isBoxOfficeCategory);
+
+  const selectedCategoryKey = selectedCategory ? getHomeCategoryKey(selectedCategory) : "";
+  const selectedPageState = pageStates[selectedCategoryKey] ?? getFallbackPageState();
+  const { data: contentData, loading, loadingMore, error } = selectedPageState;
 
   useFocusEffect(
     useCallback(() => {
@@ -138,34 +147,28 @@ export default function HomeScreen() {
     }
   }, [apiConfigStatus.needsConfiguration, error, clearError]);
 
-  useEffect(() => {
-    if (!loading && contentData.length > 0) {
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
-    } else if (loading) {
-      fadeAnim.setValue(0);
-    }
-  }, [loading, contentData.length, fadeAnim]);
+  const handleCategorySelect = useCallback(
+    (category: Category) => {
+      if (category.title === "我的电视") {
+        router.push("/my-tv");
+        return;
+      }
+      setSelectedTag(null);
+      selectCategory(category);
+    },
+    [router, selectCategory]
+  );
 
-  const handleCategorySelect = (category: Category) => {
-    if (category.title === "我的电视") {
-      router.push("/my-tv");
-      return;
-    }
-    setSelectedTag(null);
-    selectCategory(category);
-  };
-
-  const handleTagSelect = (tag: string) => {
-    setSelectedTag(tag);
-    if (selectedCategory) {
-      const categoryWithTag = { ...selectedCategory, tag: tag };
-      selectCategory(categoryWithTag);
-    }
-  };
+  const handleTagSelect = useCallback(
+    (tag: string) => {
+      setSelectedTag(tag);
+      if (selectedCategory) {
+        const categoryWithTag = { ...selectedCategory, tag: tag };
+        selectCategory(categoryWithTag);
+      }
+    },
+    [selectCategory, selectedCategory]
+  );
 
   const renderCategory = ({ item }: { item: Category }) => {
     const isSelected = selectedCategory?.title === item.title;
@@ -199,11 +202,6 @@ export default function HomeScreen() {
     />
   );
 
-  const renderFooter = () => {
-    if (!loadingMore) return null;
-    return <ActivityIndicator style={{ marginVertical: 20 }} size="large" color={Colors.dark.primary} />;
-  };
-
   const emptyMessage =
     selectedCategory?.tags && !selectedCategory?.tag
       ? "请选择一个子分类"
@@ -211,6 +209,145 @@ export default function HomeScreen() {
 
   // 检查是否需要显示API配置提示
   const shouldShowApiConfig = apiConfigStatus.needsConfiguration && selectedCategory && !selectedCategory.tags;
+
+  const swipeCategories = useMemo(() => categories.filter((c) => c.title !== "我的电视"), [categories]);
+  const selectedCategoryIndex = useMemo(() => {
+    const index = swipeCategories.findIndex((c) => c.title === selectedCategory?.title);
+    return index >= 0 ? index : 0;
+  }, [swipeCategories, selectedCategory?.title]);
+
+  const [pageIndex, setPageIndex] = useState(selectedCategoryIndex);
+  const [pagerWidth, setPagerWidth] = useState(0);
+
+  useEffect(() => {
+    setPageIndex(selectedCategoryIndex);
+  }, [selectedCategoryIndex]);
+
+  const translateX = useSharedValue(0);
+
+  const resetPagerPosition = useCallback(() => {
+    if (pagerWidth > 0) {
+      translateX.value = -pagerWidth;
+    }
+  }, [pagerWidth, translateX]);
+
+  const setPageAndSelect = useCallback(
+    (nextIndex: number) => {
+      const clampedIndex = Math.max(0, Math.min(nextIndex, swipeCategories.length - 1));
+      setPageIndex(clampedIndex);
+      const category = swipeCategories[clampedIndex];
+      if (category) {
+        handleCategorySelect(category);
+      }
+      if (pagerWidth > 0) {
+        translateX.value = -pagerWidth;
+      }
+    },
+    [handleCategorySelect, pagerWidth, swipeCategories, translateX]
+  );
+
+  const getEffectiveCategory = useCallback(
+    (category: Category): Category => {
+      if (category.title === selectedCategory?.title) {
+        if (selectedCategory.tags && !selectedCategory.tag) {
+          return { ...selectedCategory, tag: selectedCategory.tags[0] };
+        }
+        return selectedCategory;
+      }
+      if (category.tags && !category.tag) return { ...category, tag: category.tags[0] };
+      return category;
+    },
+    [selectedCategory]
+  );
+
+  const canPrefetchCategory = useCallback(
+    (category: Category) => {
+      if (category.title === "全球榜" || category.title === "中国榜") return false;
+      if (category.tags && !category.tag) return false;
+      if (!apiConfigStatus.isConfigured || apiConfigStatus.needsConfiguration) {
+        return category.type === "record";
+      }
+      return true;
+    },
+    [apiConfigStatus.isConfigured, apiConfigStatus.needsConfiguration]
+  );
+
+  useEffect(() => {
+    if (pagerWidth <= 0 || swipeCategories.length === 0) return;
+
+    translateX.value = -pagerWidth;
+
+    const current = swipeCategories[pageIndex];
+    const prev = swipeCategories[pageIndex - 1];
+    const next = swipeCategories[pageIndex + 1];
+
+    const candidates = [current, prev, next].filter(Boolean) as Category[];
+    for (const candidate of candidates) {
+      const effective = getEffectiveCategory(candidate);
+      if (canPrefetchCategory(effective)) {
+        fetchInitialData(effective);
+      }
+    }
+  }, [canPrefetchCategory, fetchInitialData, getEffectiveCategory, pageIndex, pagerWidth, swipeCategories, translateX]);
+
+  const pagerAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  const panGesture = useMemo(() => {
+    return Gesture.Pan()
+      .activeOffsetX([-SWIPE_ACTIVATION_X, SWIPE_ACTIVATION_X])
+      .failOffsetY([-SWIPE_FAIL_Y, SWIPE_FAIL_Y])
+      .onBegin(() => {
+        if (pagerWidth > 0) {
+          translateX.value = -pagerWidth;
+        }
+      })
+      .onUpdate((event) => {
+        if (pagerWidth <= 0) return;
+
+        const hasPrev = pageIndex > 0;
+        const hasNext = pageIndex < swipeCategories.length - 1;
+        let nextTranslateX = -pagerWidth + event.translationX;
+
+        if (!hasPrev && event.translationX > 0) {
+          nextTranslateX = -pagerWidth + event.translationX * 0.3;
+        } else if (!hasNext && event.translationX < 0) {
+          nextTranslateX = -pagerWidth + event.translationX * 0.3;
+        }
+
+        translateX.value = nextTranslateX;
+      })
+      .onEnd((event) => {
+        if (pagerWidth <= 0) return;
+
+        const hasPrev = pageIndex > 0;
+        const hasNext = pageIndex < swipeCategories.length - 1;
+        const distanceThreshold = pagerWidth * SWIPE_DISTANCE_THRESHOLD_RATIO;
+
+        let direction = 0;
+        if (event.translationX > distanceThreshold || event.velocityX > SWIPE_VELOCITY_THRESHOLD) {
+          direction = hasPrev ? -1 : 0;
+        } else if (event.translationX < -distanceThreshold || event.velocityX < -SWIPE_VELOCITY_THRESHOLD) {
+          direction = hasNext ? 1 : 0;
+        }
+
+        const targetX = direction === -1 ? 0 : direction === 1 ? -pagerWidth * 2 : -pagerWidth;
+
+        translateX.value = withSpring(
+          targetX,
+          { damping: 20, stiffness: 180, mass: 0.6 },
+          (finished) => {
+            if (!finished) return;
+            if (direction !== 0) {
+              runOnJS(setPageAndSelect)(pageIndex + direction);
+            } else {
+              runOnJS(resetPagerPosition)();
+            }
+          }
+        );
+      });
+  }, [pageIndex, pagerWidth, resetPagerPosition, setPageAndSelect, swipeCategories.length, translateX]);
 
   // TV端和平板端的顶部导航
   const renderHeader = () => {
@@ -309,7 +446,111 @@ export default function HomeScreen() {
     contentContainer: {
       flex: 1,
     },
+    pagerContainer: {
+      flex: 1,
+      overflow: "hidden",
+    },
+    pagerRow: {
+      flex: 1,
+      flexDirection: "row",
+      width: pagerWidth > 0 ? pagerWidth * 3 : "100%",
+    },
+    pagerPage: {
+      flex: 1,
+      width: pagerWidth > 0 ? pagerWidth : "100%",
+    },
   });
+
+  const HomeCategoryContent = ({
+    category,
+    pointerEvents,
+  }: {
+    category: Category;
+    pointerEvents?: "auto" | "none";
+  }) => {
+    const effectiveCategory = getEffectiveCategory(category);
+    const pageKey = getHomeCategoryKey(effectiveCategory);
+    const pageState = pageStates[pageKey] ?? getFallbackPageState();
+
+    const isBoxOffice = effectiveCategory.title === "全球榜" || effectiveCategory.title === "中国榜";
+    const isGlobalBoxOffice = effectiveCategory.title === "全球榜";
+    const isChinaBoxOffice = effectiveCategory.title === "中国榜";
+    const { globalBoxOffice, chinaBoxOffice, loading: boxOfficeLoading, error: boxOfficeError } =
+      useBoxOfficeRankings(isBoxOffice);
+
+    const emptyMessageForPage =
+      effectiveCategory.tags && !effectiveCategory.tag ? "请选择一个子分类" : "该分类下暂无内容";
+
+    const shouldShowApiConfigForPage =
+      apiConfigStatus.needsConfiguration && effectiveCategory && !effectiveCategory.tags;
+
+    if (shouldShowApiConfigForPage) {
+      return (
+        <View style={commonStyles.center} pointerEvents={pointerEvents}>
+          <ThemedText type="subtitle" style={{ padding: spacing, textAlign: "center" }}>
+            {getApiConfigErrorMessage(apiConfigStatus)}
+          </ThemedText>
+        </View>
+      );
+    }
+
+    if (apiConfigStatus.isValidating) {
+      return (
+        <View style={commonStyles.center} pointerEvents={pointerEvents}>
+          <ActivityIndicator size="large" color={Colors.dark.primary} />
+          <ThemedText type="subtitle" style={{ padding: spacing, textAlign: "center" }}>
+            正在验证服务器配置...
+          </ThemedText>
+        </View>
+      );
+    }
+
+    if (apiConfigStatus.error && !apiConfigStatus.isValid) {
+      return (
+        <View style={commonStyles.center} pointerEvents={pointerEvents}>
+          <ThemedText type="subtitle" style={{ padding: spacing, textAlign: "center" }}>
+            {apiConfigStatus.error}
+          </ThemedText>
+        </View>
+      );
+    }
+
+    if (isBoxOffice) {
+      return (
+        <View style={dynamicStyles.contentContainer} pointerEvents={pointerEvents}>
+          <BoxOfficeSidebar
+            globalBoxOffice={isGlobalBoxOffice ? globalBoxOffice : null}
+            chinaBoxOffice={isChinaBoxOffice ? chinaBoxOffice : null}
+            loading={boxOfficeLoading}
+            error={boxOfficeError}
+          />
+        </View>
+      );
+    }
+
+    if (effectiveCategory.tags && !effectiveCategory.tag) {
+      return (
+        <View style={commonStyles.center} pointerEvents={pointerEvents}>
+          <ThemedText>{emptyMessageForPage}</ThemedText>
+        </View>
+      );
+    }
+
+    return (
+      <View style={dynamicStyles.contentContainer} pointerEvents={pointerEvents}>
+        <CustomScrollView
+          data={pageState.data}
+          renderItem={renderContentItem}
+          loading={pageState.loading}
+          loadingMore={pageState.loadingMore}
+          error={pageState.error}
+          onEndReached={() => loadMoreData(effectiveCategory)}
+          loadMoreThreshold={LOAD_MORE_THRESHOLD}
+          emptyMessage={emptyMessageForPage}
+        />
+      </View>
+    );
+  };
 
   const content = (
     <ThemedView style={[commonStyles.container, dynamicStyles.container]}>
@@ -359,58 +600,74 @@ export default function HomeScreen() {
       )}
 
       {/* 内容网格 */}
-      {shouldShowApiConfig ? (
-        <View style={commonStyles.center}>
-          <ThemedText type="subtitle" style={{ padding: spacing, textAlign: "center" }}>
-            {getApiConfigErrorMessage(apiConfigStatus)}
-          </ThemedText>
-        </View>
-      ) : apiConfigStatus.isValidating ? (
-        <View style={commonStyles.center}>
-          <ActivityIndicator size="large" color={Colors.dark.primary} />
-          <ThemedText type="subtitle" style={{ padding: spacing, textAlign: "center" }}>
-            正在验证服务器配置...
-          </ThemedText>
-        </View>
-      ) : apiConfigStatus.error && !apiConfigStatus.isValid ? (
-        <View style={commonStyles.center}>
-          <ThemedText type="subtitle" style={{ padding: spacing, textAlign: "center" }}>
-            {apiConfigStatus.error}
-          </ThemedText>
-        </View>
-      ) : isBoxOfficeCategory ? (
-        <View style={dynamicStyles.contentContainer}>
-          <BoxOfficeSidebar
-            globalBoxOffice={isGlobalBoxOffice ? globalBoxOffice : null}
-            chinaBoxOffice={isChinaBoxOffice ? chinaBoxOffice : null}
-            loading={boxOfficeLoading}
-            error={boxOfficeError}
-          />
-        </View>
-      ) : loading ? (
-        <View style={commonStyles.center}>
-          <ActivityIndicator size="large" color={Colors.dark.primary} />
-        </View>
-      ) : error ? (
-        <View style={commonStyles.center}>
-          <ThemedText type="subtitle" style={{ padding: spacing }}>
-            {error}
-          </ThemedText>
+      {deviceType === "mobile" ? (
+        <View
+          style={dynamicStyles.pagerContainer}
+          onLayout={(e) => {
+            const width = e.nativeEvent.layout.width;
+            if (width > 0 && width !== pagerWidth) {
+              setPagerWidth(width);
+              translateX.value = -width;
+            }
+          }}
+        >
+          {pagerWidth > 0 ? (
+            <GestureDetector gesture={panGesture}>
+              <Animated.View style={[dynamicStyles.pagerRow, pagerAnimatedStyle]}>
+                <View style={dynamicStyles.pagerPage}>
+                  {swipeCategories[pageIndex - 1] ? (
+                    <HomeCategoryContent category={swipeCategories[pageIndex - 1]} pointerEvents="none" />
+                  ) : (
+                    <View style={dynamicStyles.contentContainer} />
+                  )}
+                </View>
+                <View style={dynamicStyles.pagerPage}>
+                  <HomeCategoryContent category={swipeCategories[pageIndex]} pointerEvents="auto" />
+                </View>
+                <View style={dynamicStyles.pagerPage}>
+                  {swipeCategories[pageIndex + 1] ? (
+                    <HomeCategoryContent category={swipeCategories[pageIndex + 1]} pointerEvents="none" />
+                  ) : (
+                    <View style={dynamicStyles.contentContainer} />
+                  )}
+                </View>
+              </Animated.View>
+            </GestureDetector>
+          ) : (
+            <HomeCategoryContent category={selectedCategory} pointerEvents="auto" />
+          )}
         </View>
       ) : (
-        <Animated.View style={[dynamicStyles.contentContainer, { opacity: fadeAnim }]}>
-          <CustomScrollView
-            data={contentData}
-            renderItem={renderContentItem}
-            loading={loading}
-            loadingMore={loadingMore}
-            error={error}
-            onEndReached={loadMoreData}
-            loadMoreThreshold={LOAD_MORE_THRESHOLD}
-            emptyMessage={emptyMessage}
-            ListFooterComponent={renderFooter}
-          />
-        </Animated.View>
+        <View style={dynamicStyles.contentContainer}>
+          {shouldShowApiConfig ? (
+            <View style={commonStyles.center}>
+              <ThemedText type="subtitle" style={{ padding: spacing, textAlign: "center" }}>
+                {getApiConfigErrorMessage(apiConfigStatus)}
+              </ThemedText>
+            </View>
+          ) : loading ? (
+            <View style={commonStyles.center}>
+              <ActivityIndicator size="large" color={Colors.dark.primary} />
+            </View>
+          ) : error ? (
+            <View style={commonStyles.center}>
+              <ThemedText type="subtitle" style={{ padding: spacing }}>
+                {error}
+              </ThemedText>
+            </View>
+          ) : (
+            <CustomScrollView
+              data={contentData}
+              renderItem={renderContentItem}
+              loading={loading}
+              loadingMore={loadingMore}
+              error={error}
+              onEndReached={loadMoreData}
+              loadMoreThreshold={LOAD_MORE_THRESHOLD}
+              emptyMessage={emptyMessage}
+            />
+          )}
+        </View>
       )}
     </ThemedView>
   );

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { Home, Search, Heart, Settings, Tv } from 'lucide-react-native';
@@ -35,18 +35,16 @@ const MobileTabContainer: React.FC<MobileTabContainerProps> = ({ children }) => 
     deviceType !== 'mobile' || tab.key !== 'live'
   );
   
-  const handleTabPress = (route: string) => {
-    if (route === '/') {
-      router.push('/');
-    } else {
-      router.push(route as any);
-    }
-  };
-
   const isTabActive = (route: string) => {
     if (route === '/' && pathname === '/') return true;
     if (route !== '/' && pathname === route) return true;
     return false;
+  };
+
+  const handleTabPress = (route: string) => {
+    // Tab 切换不应该像 Stack push 一样“打开新页面”，用 replace 避免堆栈叠加
+    if (isTabActive(route)) return;
+    router.replace(route as any);
   };
 
   const dynamicStyles = createStyles(spacing);
