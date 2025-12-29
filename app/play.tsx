@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useCallback, memo, useMemo } from "react";
-import { StyleSheet, TouchableOpacity, BackHandler, AppState, AppStateStatus, View } from "react-native";
+import React, { useEffect, useRef, useCallback, memo, useMemo, useState } from "react";
+import { StyleSheet, TouchableOpacity, BackHandler, AppState, AppStateStatus, View, Platform } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Video } from "expo-av";
 import { useKeepAwake } from "expo-keep-awake";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { ThemedView } from "@/components/ThemedView";
 import { PlayerControls } from "@/components/PlayerControls";
 import { EpisodeSelectionModal } from "@/components/EpisodeSelectionModal";
@@ -20,6 +21,8 @@ import { useVideoHandlers } from "@/hooks/useVideoHandlers";
 import Logger from '@/utils/Logger';
 
 const logger = Logger.withTag('PlayScreen');
+
+const CONTROLS_TIMEOUT = 5000;
 
 // 优化的加载动画组件
 const LoadingContainer = memo(
@@ -71,8 +74,11 @@ const createResponsiveStyles = (deviceType: string) => {
 
 export default function PlayScreen() {
   const videoRef = useRef<Video>(null);
+  const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isTogglingOrientationRef = useRef(false);
   const router = useRouter();
   useKeepAwake();
+  const [isLandscape, setIsLandscape] = useState(false);
 
   // 响应式布局配置
   const { deviceType } = useResponsiveLayout();
@@ -112,6 +118,8 @@ export default function PlayScreen() {
     loadVideo,
   } = usePlayerStore();
   const currentEpisode = usePlayerStore(selectCurrentEpisode);
+  const { showEpisodeModal, showSourceModal, showSpeedModal, setShowEpisodeModal, setShowSourceModal, setShowSpeedModal } =
+    usePlayerStore();
 
   // 使用Video事件处理hook
   const { videoProps } = useVideoHandlers({
@@ -121,7 +129,6 @@ export default function PlayScreen() {
     introEndTime,
     playbackRate,
     handlePlaybackStatusUpdate,
-    deviceType,
     detail: detail || undefined,
   });
 
@@ -130,6 +137,83 @@ export default function PlayScreen() {
 
   // 优化的动态样式 - 使用useMemo避免重复计算
   const dynamicStyles = useMemo(() => createResponsiveStyles(deviceType), [deviceType]);
+
+  useEffect(() => {
+    if (Platform.isTV) return;
+
+    const applyInitialLock = async () => {
+      try {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+        setIsLandscape(true);
+      } catch (error) {
+        logger.debug("Failed to lock initial orientation", error);
+      }
+    };
+
+    void applyInitialLock();
+
+    return () => {
+      void ScreenOrientation.unlockAsync();
+    };
+  }, []);
+
+  const toggleOrientation = useCallback(async () => {
+    if (Platform.isTV) return;
+    if (isTogglingOrientationRef.current) return;
+    isTogglingOrientationRef.current = true;
+
+    try {
+      if (isLandscape) {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        setIsLandscape(false);
+      } else {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+        setIsLandscape(true);
+      }
+    } catch (error) {
+      logger.debug("Failed to toggle orientation", error);
+      Toast.show({ type: "error", text1: "切换横竖屏失败" });
+    } finally {
+      isTogglingOrientationRef.current = false;
+    }
+  }, [isLandscape]);
+
+  const onToggleOrientationPress = useCallback(() => {
+    setShowControls(false);
+    setShowEpisodeModal(false);
+    setShowSourceModal(false);
+    setShowSpeedModal(false);
+    void toggleOrientation();
+  }, [setShowControls, setShowEpisodeModal, setShowSourceModal, setShowSpeedModal, toggleOrientation]);
+
+  const onBackPress = useCallback(() => {
+    if (showEpisodeModal) {
+      setShowEpisodeModal(false);
+      return;
+    }
+    if (showSourceModal) {
+      setShowSourceModal(false);
+      return;
+    }
+    if (showSpeedModal) {
+      setShowSpeedModal(false);
+      return;
+    }
+
+    router.back();
+  }, [router, setShowEpisodeModal, setShowSourceModal, setShowSpeedModal, showEpisodeModal, showSourceModal, showSpeedModal]);
+
+  const resetControlsTimer = useCallback(() => {
+    if (deviceType === "tv") return;
+
+    if (controlsTimerRef.current) {
+      clearTimeout(controlsTimerRef.current);
+    }
+
+    controlsTimerRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, CONTROLS_TIMEOUT);
+  }, [deviceType, setShowControls]);
 
   useEffect(() => {
     const perfStart = performance.now();
@@ -157,9 +241,30 @@ export default function PlayScreen() {
     if (deviceType === "tv") {
       tvRemoteHandler.onScreenPress();
     } else {
-      setShowControls(!showControls);
+      const newShowControls = !showControls;
+      setShowControls(newShowControls);
+      if (newShowControls) {
+        resetControlsTimer();
+      } else if (controlsTimerRef.current) {
+        clearTimeout(controlsTimerRef.current);
+        controlsTimerRef.current = null;
+      }
     }
-  }, [deviceType, tvRemoteHandler, setShowControls, showControls]);
+  }, [deviceType, tvRemoteHandler, setShowControls, showControls, resetControlsTimer]);
+
+  useEffect(() => {
+    if (deviceType === "tv") return;
+    if (!showControls) return;
+
+    resetControlsTimer();
+
+    return () => {
+      if (controlsTimerRef.current) {
+        clearTimeout(controlsTimerRef.current);
+        controlsTimerRef.current = null;
+      }
+    };
+  }, [deviceType, showControls, resetControlsTimer]);
 
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
@@ -177,6 +282,18 @@ export default function PlayScreen() {
 
   useEffect(() => {
     const backAction = () => {
+      if (showEpisodeModal) {
+        setShowEpisodeModal(false);
+        return true;
+      }
+      if (showSourceModal) {
+        setShowSourceModal(false);
+        return true;
+      }
+      if (showSpeedModal) {
+        setShowSpeedModal(false);
+        return true;
+      }
       if (showControls) {
         setShowControls(false);
         return true;
@@ -188,7 +305,7 @@ export default function PlayScreen() {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", backAction);
 
     return () => backHandler.remove();
-  }, [showControls, setShowControls, router]);
+  }, [router, setShowControls, setShowEpisodeModal, setShowSourceModal, setShowSpeedModal, showControls, showEpisodeModal, showSourceModal, showSpeedModal]);
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null;
@@ -219,7 +336,6 @@ export default function PlayScreen() {
         activeOpacity={1}
         style={dynamicStyles.videoContainer}
         onPress={onScreenPress}
-        disabled={deviceType !== "tv" && showControls} // 移动端和平板端在显示控制条时禁用触摸
       >
         {/* 条件渲染Video组件：只有在有有效URL时才渲染 */}
         {currentEpisode?.url ? (
@@ -228,8 +344,15 @@ export default function PlayScreen() {
           <LoadingContainer style={dynamicStyles.loadingContainer} currentEpisode={currentEpisode} />
         )}
 
-        {showControls && deviceType === "tv" && (
-          <PlayerControls showControls={showControls} setShowControls={setShowControls} />
+        {showControls && (
+          <PlayerControls
+            showControls={showControls}
+            setShowControls={setShowControls}
+            onUserActivity={resetControlsTimer}
+            onBack={onBackPress}
+            isLandscape={isLandscape}
+            onToggleOrientation={onToggleOrientationPress}
+          />
         )}
 
         <SeekingBar />

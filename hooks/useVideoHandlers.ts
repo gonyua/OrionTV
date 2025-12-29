@@ -10,7 +10,6 @@ interface UseVideoHandlersProps {
   introEndTime?: number;
   playbackRate: number;
   handlePlaybackStatusUpdate: (status: any) => void;
-  deviceType: string;
   detail?: { poster?: string };
 }
 
@@ -21,7 +20,6 @@ export const useVideoHandlers = ({
   introEndTime,
   playbackRate,
   handlePlaybackStatusUpdate,
-  deviceType,
   detail,
 }: UseVideoHandlersProps) => {
   
@@ -109,7 +107,8 @@ export const useVideoHandlers = ({
     onLoad,
     onLoadStart,
     onError,
-    useNativeControls: deviceType !== 'tv',
+    // 手机和tv端使用自定义控件层（暂停/选集/播放源等），关闭系统原生 controls
+    useNativeControls: false,
     shouldPlay: true,
   }), [
     currentEpisode?.url,
@@ -119,7 +118,6 @@ export const useVideoHandlers = ({
     onLoad,
     onLoadStart,
     onError,
-    deviceType,
   ]);
 
   return {

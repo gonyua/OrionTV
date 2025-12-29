@@ -1,7 +1,8 @@
-import React from "react";
-import { View, Text, StyleSheet, Modal, FlatList } from "react-native";
+import React, { useMemo } from "react";
+import { View, Text, StyleSheet, Modal, FlatList, Pressable } from "react-native";
 import { StyledButton } from "./StyledButton";
 import usePlayerStore from "@/stores/playerStore";
+import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 
 interface SpeedOption {
   rate: number;
@@ -20,6 +21,50 @@ const SPEED_OPTIONS: SpeedOption[] = [
 
 export const SpeedSelectionModal: React.FC = () => {
   const { showSpeedModal, setShowSpeedModal, playbackRate, setPlaybackRate } = usePlayerStore();
+  const { deviceType, screenWidth, screenHeight } = useResponsiveLayout();
+  const isTouchDevice = deviceType !== "tv";
+
+  const numColumns = deviceType === "mobile" ? 3 : 3;
+
+  const styles = useMemo(() => {
+    if (!isTouchDevice) return tvStyles;
+
+    const maxHeight = Math.min(screenHeight * 0.6, 420);
+    return StyleSheet.create({
+      modalContainer: {
+        flex: 1,
+        justifyContent: "flex-end",
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+      },
+      modalContent: {
+        width: screenWidth,
+        height: maxHeight,
+        backgroundColor: "rgba(0, 0, 0, 0.92)",
+        padding: 16,
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+      },
+      modalTitle: {
+        color: "white",
+        marginBottom: 12,
+        textAlign: "center",
+        fontSize: 18,
+        fontWeight: "bold",
+      },
+      speedList: {
+        justifyContent: "flex-start",
+        paddingBottom: 16,
+      },
+      speedItem: {
+        flex: 1,
+        paddingVertical: 10,
+        margin: 6,
+      },
+      speedItemText: {
+        fontSize: 16,
+      },
+    });
+  }, [isTouchDevice, screenWidth, screenHeight]);
 
   const onSelectSpeed = (rate: number) => {
     setPlaybackRate(rate);
@@ -31,13 +76,22 @@ export const SpeedSelectionModal: React.FC = () => {
   };
 
   return (
-    <Modal visible={showSpeedModal} transparent={true} animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={showSpeedModal}
+      transparent={true}
+      animationType="slide"
+      supportedOrientations={["portrait", "landscape"]}
+      onRequestClose={onClose}
+    >
       <View style={styles.modalContainer}>
+        {isTouchDevice && <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} accessible={false} />}
         <View style={styles.modalContent}>
           <Text style={styles.modalTitle}>播放速度</Text>
           <FlatList
+            key={`speed-columns-${numColumns}`}
             data={SPEED_OPTIONS}
-            numColumns={3}
+            numColumns={numColumns}
+            style={{ flex: 1 }}
             contentContainerStyle={styles.speedList}
             keyExtractor={(item) => `speed-${item.rate}`}
             renderItem={({ item }) => (
@@ -57,7 +111,7 @@ export const SpeedSelectionModal: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const tvStyles = StyleSheet.create({
   modalContainer: {
     flex: 1,
     flexDirection: "row",
@@ -81,11 +135,9 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
   },
   speedItem: {
+    flex: 1,
     paddingVertical: 10,
     margin: 4,
-    marginLeft: 10,
-    marginRight: 8,
-    width: "30%",
   },
   speedItemText: {
     fontSize: 16,

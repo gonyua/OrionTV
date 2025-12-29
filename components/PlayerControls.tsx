@@ -1,19 +1,45 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
-import { Pause, Play, SkipForward, List, Tv, ArrowDownToDot, ArrowUpFromDot, Gauge } from "lucide-react-native";
+import {
+  Pause,
+  Play,
+  SkipForward,
+  List,
+  Tv,
+  ArrowDownToDot,
+  ArrowUpFromDot,
+  Gauge,
+  ArrowLeft,
+  RectangleHorizontal,
+  RectangleVertical,
+} from "lucide-react-native";
 import { ThemedText } from "@/components/ThemedText";
 import { MediaButton } from "@/components/MediaButton";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StyledButton } from "./StyledButton";
 
 import usePlayerStore from "@/stores/playerStore";
 import useDetailStore from "@/stores/detailStore";
 import { useSources } from "@/stores/sourceStore";
+import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 
 interface PlayerControlsProps {
   showControls: boolean;
   setShowControls: (show: boolean) => void;
+  onUserActivity?: () => void;
+  onBack?: () => void;
+  isLandscape?: boolean;
+  onToggleOrientation?: () => void;
 }
 
-export const PlayerControls: React.FC<PlayerControlsProps> = ({ showControls, setShowControls }) => {
+export const PlayerControls: React.FC<PlayerControlsProps> = ({
+  showControls,
+  setShowControls,
+  onUserActivity,
+  onBack,
+  isLandscape,
+  onToggleOrientation,
+}) => {
   const {
     currentEpisodeIndex,
     episodes,
@@ -32,6 +58,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({ showControls, se
     introEndTime,
     outroStartTime,
   } = usePlayerStore();
+
+  const { deviceType } = useResponsiveLayout();
+  const insets = useSafeAreaInsets();
+  const isTouchDevice = deviceType !== "tv";
 
   const { detail } = useDetailStore();
   const resources = useSources();
@@ -57,13 +87,60 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({ showControls, se
     }
   };
 
+  const runWithActivity = (action: () => void | Promise<void>) => () => {
+    onUserActivity?.();
+    void action();
+  };
+
+  const overlayStyle = useMemo(() => {
+    if (deviceType === "tv") return styles.controlsOverlay;
+
+    return [
+      styles.controlsOverlay,
+      {
+        paddingTop: 20 + insets.top,
+        paddingBottom: 20 + insets.bottom,
+        paddingLeft: 20 + insets.left,
+        paddingRight: 20 + insets.right,
+      },
+    ];
+  }, [deviceType, insets.bottom, insets.left, insets.right, insets.top]);
+
   return (
-    <View style={styles.controlsOverlay}>
+    <View style={overlayStyle}>
       <View style={styles.topControls}>
+        {isTouchDevice && (
+          <View style={styles.topSideContainerLeft}>
+            <StyledButton
+              variant="ghost"
+              onPress={runWithActivity(() => {
+                onBack?.();
+              })}
+              buttonStyle={styles.topIconButton}
+              accessibilityLabel="返回"
+            >
+              <ArrowLeft color="white" size={22} />
+            </StyledButton>
+          </View>
+        )}
         <Text style={styles.controlTitle}>
           {videoTitle} {currentEpisodeTitle ? `- ${currentEpisodeTitle}` : ""}{" "}
           {currentSourceName ? `(${currentSourceName})` : ""}
         </Text>
+        {isTouchDevice && (
+          <View style={styles.topSideContainerRight}>
+            <StyledButton
+              variant="ghost"
+              onPress={() => {
+                onToggleOrientation?.();
+              }}
+              buttonStyle={styles.topIconButton}
+              accessibilityLabel="切换横竖屏"
+            >
+              {isLandscape ? <RectangleVertical color="white" size={20} /> : <RectangleHorizontal color="white" size={20} />}
+            </StyledButton>
+          </View>
+        )}
       </View>
 
       <View style={styles.bottomControlsContainer}>
@@ -87,11 +164,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({ showControls, se
         </ThemedText>
 
         <View style={styles.bottomControls}>
-          <MediaButton onPress={setIntroEndTime} timeLabel={introEndTime ? formatTime(introEndTime) : undefined}>
+          <MediaButton onPress={runWithActivity(setIntroEndTime)} timeLabel={introEndTime ? formatTime(introEndTime) : undefined}>
             <ArrowDownToDot color="white" size={24} />
           </MediaButton>
 
-          <MediaButton onPress={togglePlayPause} hasTVPreferredFocus={showControls}>
+          <MediaButton onPress={runWithActivity(togglePlayPause)} hasTVPreferredFocus={showControls}>
             {status?.isLoaded && status.isPlaying ? (
               <Pause color="white" size={24} />
             ) : (
@@ -99,23 +176,23 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({ showControls, se
             )}
           </MediaButton>
 
-          <MediaButton onPress={onPlayNextEpisode} disabled={!hasNextEpisode}>
+          <MediaButton onPress={runWithActivity(onPlayNextEpisode)} disabled={!hasNextEpisode}>
             <SkipForward color={hasNextEpisode ? "white" : "#666"} size={24} />
           </MediaButton>
 
-          <MediaButton onPress={setOutroStartTime} timeLabel={outroStartTime ? formatTime(outroStartTime) : undefined}>
+          <MediaButton onPress={runWithActivity(setOutroStartTime)} timeLabel={outroStartTime ? formatTime(outroStartTime) : undefined}>
             <ArrowUpFromDot color="white" size={24} />
           </MediaButton>
 
-          <MediaButton onPress={() => setShowEpisodeModal(true)}>
+          <MediaButton onPress={runWithActivity(() => setShowEpisodeModal(true))}>
             <List color="white" size={24} />
           </MediaButton>
 
-          <MediaButton onPress={() => setShowSpeedModal(true)} timeLabel={playbackRate !== 1.0 ? `${playbackRate}x` : undefined}>
+          <MediaButton onPress={runWithActivity(() => setShowSpeedModal(true))} timeLabel={playbackRate !== 1.0 ? `${playbackRate}x` : undefined}>
             <Gauge color="white" size={24} />
           </MediaButton>
 
-          <MediaButton onPress={() => setShowSourceModal(true)}>
+          <MediaButton onPress={runWithActivity(() => setShowSourceModal(true))}>
             <Tv color="white" size={24} />
           </MediaButton>
         </View>
@@ -135,6 +212,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+  topSideContainerLeft: {
+    width: 96,
+    alignItems: "flex-start",
+  },
+  topSideContainerRight: {
+    width: 96,
+    alignItems: "flex-end",
+  },
+  topIconButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    minWidth: 44,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.35)",
   },
   controlTitle: {
     color: "white",

@@ -1,15 +1,60 @@
-import React from "react";
-import { View, Text, StyleSheet, Modal, FlatList } from "react-native";
+import React, { useMemo } from "react";
+import { View, Text, StyleSheet, Modal, FlatList, Pressable } from "react-native";
 import { StyledButton } from "./StyledButton";
 import useDetailStore from "@/stores/detailStore";
 import usePlayerStore from "@/stores/playerStore";
 import Logger from '@/utils/Logger';
+import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 
 const logger = Logger.withTag('SourceSelectionModal');
 
 export const SourceSelectionModal: React.FC = () => {
   const { showSourceModal, setShowSourceModal, loadVideo, currentEpisodeIndex, status } = usePlayerStore();
   const { searchResults, detail, setDetail } = useDetailStore();
+  const { deviceType, screenWidth, screenHeight } = useResponsiveLayout();
+  const isTouchDevice = deviceType !== "tv";
+
+  const numColumns = deviceType === "mobile" ? 2 : 3;
+
+  const styles = useMemo(() => {
+    if (!isTouchDevice) return tvStyles;
+
+    const maxHeight = Math.min(screenHeight * 0.75, 520);
+    return StyleSheet.create({
+      modalContainer: {
+        flex: 1,
+        justifyContent: "flex-end",
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+      },
+      modalContent: {
+        width: screenWidth,
+        height: maxHeight,
+        backgroundColor: "rgba(0, 0, 0, 0.92)",
+        padding: 16,
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+      },
+      modalTitle: {
+        color: "white",
+        marginBottom: 12,
+        textAlign: "center",
+        fontSize: 18,
+        fontWeight: "bold",
+      },
+      sourceList: {
+        justifyContent: "flex-start",
+        paddingBottom: 16,
+      },
+      sourceItem: {
+        flex: 1,
+        paddingVertical: 10,
+        margin: 6,
+      },
+      sourceItemText: {
+        fontSize: 14,
+      },
+    });
+  }, [isTouchDevice, screenWidth, screenHeight]);
 
   const onSelectSource = (index: number) => {
     logger.debug("onSelectSource", index, searchResults[index].source, detail?.source);
@@ -35,13 +80,22 @@ export const SourceSelectionModal: React.FC = () => {
   };
 
   return (
-    <Modal visible={showSourceModal} transparent={true} animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={showSourceModal}
+      transparent={true}
+      animationType="slide"
+      supportedOrientations={["portrait", "landscape"]}
+      onRequestClose={onClose}
+    >
       <View style={styles.modalContainer}>
+        {isTouchDevice && <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} accessible={false} />}
         <View style={styles.modalContent}>
           <Text style={styles.modalTitle}>选择播放源</Text>
           <FlatList
+            key={`source-columns-${numColumns}`}
             data={searchResults}
-            numColumns={3}
+            numColumns={numColumns}
+            style={{ flex: 1 }}
             contentContainerStyle={styles.sourceList}
             keyExtractor={(item, index) => `source-${item.source}-${index}`}
             renderItem={({ item, index }) => (
@@ -61,7 +115,7 @@ export const SourceSelectionModal: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const tvStyles = StyleSheet.create({
   modalContainer: {
     flex: 1,
     flexDirection: "row",
@@ -85,11 +139,9 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
   },
   sourceItem: {
+    flex: 1,
     paddingVertical: 2,
     margin: 4,
-    marginLeft: 10,
-    marginRight: 8,
-    width: "30%",
   },
   sourceItemText: {
     fontSize: 14,
