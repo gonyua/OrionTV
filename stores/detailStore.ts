@@ -14,6 +14,7 @@ interface DetailState {
   searchResults: SearchResultWithResolution[];
   sources: { source: string; source_name: string; resolution: string | null | undefined }[];
   detail: SearchResultWithResolution | null;
+  detailLocked: boolean;
   loading: boolean;
   error: string | null;
   allSourcesLoaded: boolean;
@@ -34,6 +35,7 @@ const useDetailStore = create<DetailState>((set, get) => ({
   searchResults: [],
   sources: [],
   detail: null,
+  detailLocked: false,
   loading: true,
   error: null,
   allSourcesLoaded: false,
@@ -57,12 +59,38 @@ const useDetailStore = create<DetailState>((set, get) => ({
       loading: true,
       searchResults: [],
       detail: null,
+      detailLocked: false,
       error: null,
       allSourcesLoaded: false,
       controller: newController,
     });
 
     const { videoSource } = useSettingsStore.getState();
+
+    const scoreDetail = (candidate: SearchResultWithResolution | null) => {
+      if (!candidate) return -1;
+      const episodeCount = candidate.episodes?.length || 0;
+      const hasYear = Boolean(candidate.year && candidate.year.trim());
+      const hasDesc = Boolean(candidate.desc && candidate.desc.trim());
+      const hasType = Boolean(candidate.type_name && candidate.type_name.trim());
+      return (episodeCount > 0 ? 1000 : 0) + Math.min(episodeCount, 999) + (hasYear ? 10 : 0) + (hasDesc ? 5 : 0) + (hasType ? 1 : 0);
+    };
+
+    const shouldAutoUpgradeDetail = (candidate: SearchResultWithResolution | null) => {
+      if (!candidate) return true;
+      const episodeCount = candidate.episodes?.length || 0;
+      const hasYear = Boolean(candidate.year && candidate.year.trim());
+      const hasDesc = Boolean(candidate.desc && candidate.desc.trim());
+      return episodeCount === 0 || !hasYear || !hasDesc;
+    };
+
+    const pickBestDetail = (candidates: SearchResultWithResolution[]) => {
+      if (candidates.length === 0) return null;
+      return candidates.reduce<SearchResultWithResolution | null>((best, item) => {
+        if (!best) return item;
+        return scoreDetail(item) > scoreDetail(best) ? item : best;
+      }, null);
+    };
 
     const processAndSetResults = async (results: SearchResult[], merge = false) => {
       const resolutionStart = performance.now();
@@ -92,10 +120,23 @@ const useDetailStore = create<DetailState>((set, get) => ({
 
       if (signal.aborted) return;
 
+      const prevDetail = get().detail;
+      const prevDetailKey = prevDetail ? `${prevDetail.source}+${prevDetail.id}` : null;
       set((state) => {
         const existingSources = new Set(state.searchResults.map((r) => r.source));
         const newResults = resultsWithResolution.filter((r) => !existingSources.has(r.source));
         const finalResults = merge ? [...state.searchResults, ...newResults] : resultsWithResolution;
+
+        const bestDetail = pickBestDetail(finalResults);
+
+        let selectedDetail = state.detail;
+        if (!selectedDetail) {
+          selectedDetail = bestDetail;
+        } else if (!state.detailLocked && shouldAutoUpgradeDetail(selectedDetail) && bestDetail) {
+          if (scoreDetail(bestDetail) > scoreDetail(selectedDetail)) {
+            selectedDetail = bestDetail;
+          }
+        }
 
         return {
           searchResults: finalResults,
@@ -104,9 +145,26 @@ const useDetailStore = create<DetailState>((set, get) => ({
             source_name: r.source_name,
             resolution: r.resolution,
           })),
-          detail: state.detail ?? finalResults[0] ?? null,
+          detail: selectedDetail ?? null,
         };
       });
+
+      const nextDetail = get().detail;
+      const nextDetailKey = nextDetail ? `${nextDetail.source}+${nextDetail.id}` : null;
+      const detailChanged = prevDetailKey !== nextDetailKey;
+
+      if (signal.aborted || !detailChanged || !nextDetail) return;
+      try {
+        const isFavorited = await FavoriteManager.isFavorited(nextDetail.source, nextDetail.id.toString());
+        const currentDetail = get().detail;
+        const isSameDetail =
+          currentDetail &&
+          currentDetail.source === nextDetail.source &&
+          currentDetail.id === nextDetail.id;
+        if (!signal.aborted && isSameDetail) set({ isFavorited });
+      } catch (favoriteError) {
+        logger.warn(`[WARN] Failed to check favorite status after detail update:`, favoriteError);
+      }
     };
 
     try {
@@ -315,7 +373,7 @@ const useDetailStore = create<DetailState>((set, get) => ({
   },
 
   setDetail: async (detail) => {
-    set({ detail });
+    set({ detail, detailLocked: true });
     const { source, id } = detail;
     const isFavorited = await FavoriteManager.isFavorited(source, id.toString());
     set({ isFavorited });

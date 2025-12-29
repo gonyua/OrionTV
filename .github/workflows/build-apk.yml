@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   direct_build:
-    name: Build Android APKs (Mobile + TV)
+    name: Build Android APK
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -38,26 +38,16 @@ jobs:
           distribution: "zulu"
           java-version: "17"
 
-      - name: Prebuild Mobile App
+      - name: Prebuild Android App
         run: yarn prebuild
 
-      - name: Build Mobile APK
+      - name: Build Android APK
         run: yarn build
 
-      - name: Archive Mobile APK
+      - name: Rename APK file
         run: |
           mkdir -p artifacts
           cp android/app/build/outputs/apk/release/app-release.apk artifacts/orionTV.${{ steps.package-version.outputs.version }}.apk
-
-      - name: Prebuild TV App
-        run: yarn prebuild-tv
-
-      - name: Build TV APK
-        run: yarn build-tv
-
-      - name: Archive TV APK
-        run: |
-          cp android/app/build/outputs/apk/release/app-release.apk artifacts/orionTV.${{ steps.package-version.outputs.version }}-tv.apk
 
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
@@ -67,8 +57,6 @@ jobs:
           body: Automated release for version v${{ steps.package-version.outputs.version }}.
           draft: false
           prerelease: false
-          files: |
-            artifacts/orionTV.${{ steps.package-version.outputs.version }}.apk
-            artifacts/orionTV.${{ steps.package-version.outputs.version }}-tv.apk
+          files: artifacts/orionTV.${{ steps.package-version.outputs.version }}.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

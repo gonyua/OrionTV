@@ -70,7 +70,7 @@ const initialCategories: Category[] = [
 ];
 
 const defaultSelectedCategory =
-  initialCategories.find((category) => category.title === "热门上映") || initialCategories[0];
+  initialCategories.find((category) => category.title === "最近播放") || initialCategories[0];
 
 // 添加缓存项接口
 interface CacheItem {
@@ -163,16 +163,16 @@ const useHomeStore = create<HomeState>((set, get) => ({
 
     try {
       if (selectedCategory.type === "record") {
-        const { isLoggedIn } = useAuthStore.getState();
-        if (!isLoggedIn) {
-          useAuthStore.getState().requireLogin();
-          set({
-            contentData: [],
-            hasMore: false,
-            error: UNAUTHORIZED_MESSAGE,
-          });
-          return;
-        }
+        // const { isLoggedIn } = useAuthStore.getState();
+        // if (!isLoggedIn) {
+        //   useAuthStore.getState().requireLogin();
+        //   set({
+        //     contentData: [],
+        //     hasMore: false,
+        //     error: UNAUTHORIZED_MESSAGE,
+        //   });
+        //   return;
+        // }
         const records = await PlayRecordManager.getAll();
         const rowItems = Object.entries(records)
           .map(([key, record]) => {
