@@ -114,13 +114,14 @@ export const SpeedSelectionModal: React.FC = () => {
 const tvStyles = StyleSheet.create({
   modalContainer: {
     flex: 1,
-    flexDirection: "row",
-    justifyContent: "flex-end",
     backgroundColor: "transparent",
   },
   modalContent: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    right: 0,
     width: 500,
-    height: "100%",
     backgroundColor: "rgba(0, 0, 0, 0.85)",
     padding: 20,
   },
