@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useCallback, memo, useMemo, useState } from "react";
-import { StyleSheet, TouchableOpacity, BackHandler, AppState, AppStateStatus, View, Platform } from "react-native";
+import React, { useEffect, useRef, useCallback, memo, useMemo, useState, Component, ErrorInfo, ReactNode } from "react";
+import { StyleSheet, TouchableOpacity, BackHandler, AppState, AppStateStatus, View, Platform, Text } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Video } from "expo-av";
 import { useKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { ThemedView } from "@/components/ThemedView";
@@ -10,19 +9,86 @@ import { EpisodeSelectionModal } from "@/components/EpisodeSelectionModal";
 import { SourceSelectionModal } from "@/components/SourceSelectionModal";
 import { SpeedSelectionModal } from "@/components/SpeedSelectionModal";
 import { SeekingBar } from "@/components/SeekingBar";
-// import { NextEpisodeOverlay } from "@/components/NextEpisodeOverlay";
 import VideoLoadingAnimation from "@/components/VideoLoadingAnimation";
 import useDetailStore from "@/stores/detailStore";
 import { useTVRemoteHandler } from "@/hooks/useTVRemoteHandler";
 import Toast from "react-native-toast-message";
 import usePlayerStore, { selectCurrentEpisode } from "@/stores/playerStore";
 import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
-import { useVideoHandlers } from "@/hooks/useVideoHandlers";
 import Logger from '@/utils/Logger';
 
 const logger = Logger.withTag('PlayScreen');
 
+// 动态导入 expo-video，处理可能的导入错误
+let VideoView: any = null;
+let useVideoPlayerHook: ((source: any, setup?: any) => any) | null = null;
+let videoModuleError: string | null = null;
+let videoModuleLoaded = false;
+
+try {
+  const expoVideo = require('expo-video');
+  VideoView = expoVideo.VideoView;
+  useVideoPlayerHook = expoVideo.useVideoPlayer;
+  videoModuleLoaded = true;
+  console.log('[PlayScreen] expo-video module loaded:', {
+    hasVideoView: !!VideoView,
+    hasUseVideoPlayer: !!useVideoPlayerHook,
+  });
+} catch (error: any) {
+  videoModuleError = error?.message || 'Failed to load expo-video';
+  console.error('[PlayScreen] Failed to load expo-video:', error);
+}
+
+// 创建一个空的 hook 作为 fallback
+const useVideoPlayerFallback = (source: any, setup?: any) => {
+  console.warn('[PlayScreen] Using fallback video player (expo-video not available)');
+  return null;
+};
+
+// 使用可用的 hook
+const useVideoPlayer = useVideoPlayerHook || useVideoPlayerFallback;
+
 const CONTROLS_TIMEOUT = 5000;
+
+// 错误边界组件
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallback?: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    logger.error('[ErrorBoundary] Caught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback || (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'black' }}>
+          <Text style={{ color: 'white', fontSize: 16, textAlign: 'center', padding: 20 }}>
+            播放器加载失败{'\n'}
+            {this.state.error?.message}
+          </Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // 优化的加载动画组件
 const LoadingContainer = memo(
@@ -51,12 +117,10 @@ const createResponsiveStyles = (deviceType: string) => {
     container: {
       flex: 1,
       backgroundColor: "black",
-      // 移动端和平板端可能需要状态栏处理
       ...(isMobile || isTablet ? { paddingTop: 0 } : {}),
     },
     videoContainer: {
       ...StyleSheet.absoluteFillObject,
-      // 为触摸设备添加更多的交互区域
       ...(isMobile || isTablet ? { zIndex: 1 } : {}),
     },
     videoPlayer: {
@@ -69,11 +133,27 @@ const createResponsiveStyles = (deviceType: string) => {
       alignItems: "center",
       zIndex: 10,
     },
+    errorContainer: {
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+      backgroundColor: "black",
+      padding: 20,
+    },
+    errorText: {
+      color: "white",
+      fontSize: 16,
+      textAlign: "center",
+      marginBottom: 20,
+    },
   });
 };
 
-export default function PlayScreen() {
-  const videoRef = useRef<Video>(null);
+// 内部播放器组件
+function PlayScreenContent() {
+  logger.info('[PlayScreen] PlayScreenContent rendering...');
+
+  const videoViewRef = useRef<any>(null);
   const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isTogglingOrientationRef = useRef(false);
   const router = useRouter();
@@ -82,6 +162,9 @@ export default function PlayScreen() {
 
   // 响应式布局配置
   const { deviceType } = useResponsiveLayout();
+  const isTouchDevice = deviceType !== "tv";
+
+  logger.info(`[PlayScreen] deviceType: ${deviceType}, isTouchDevice: ${isTouchDevice}`);
 
   const {
     episodeIndex: episodeIndexStr,
@@ -96,24 +179,30 @@ export default function PlayScreen() {
     id?: string;
     title?: string;
   }>();
+
+  logger.info(`[PlayScreen] Params - episodeIndex: ${episodeIndexStr}, source: ${sourceStr}, id: ${videoId}, title: ${videoTitle}`);
+
   const episodeIndex = parseInt(episodeIndexStr || "0", 10);
   const position = positionStr ? parseInt(positionStr, 10) : undefined;
 
   const { detail } = useDetailStore();
   const source = sourceStr || detail?.source;
-  const id = videoId || detail?.id.toString();
+  const id = videoId || detail?.id?.toString();
   const title = videoTitle || detail?.title;
+
+  logger.info(`[PlayScreen] Resolved - source: ${source}, id: ${id}, title: ${title}, hasDetail: ${!!detail}`);
+
   const {
     isLoading,
     showControls,
-    // showNextEpisodeOverlay,
     initialPosition,
     introEndTime,
     playbackRate,
-    setVideoRef,
-    handlePlaybackStatusUpdate,
     setShowControls,
-    // setShowNextEpisodeOverlay,
+    setVideoViewRef,
+    setPlayer,
+    setIsInPiP,
+    startPictureInPicture,
     reset,
     loadVideo,
   } = usePlayerStore();
@@ -121,23 +210,133 @@ export default function PlayScreen() {
   const { showEpisodeModal, showSourceModal, showSpeedModal, setShowEpisodeModal, setShowSourceModal, setShowSpeedModal } =
     usePlayerStore();
 
-  // 使用Video事件处理hook
-  const { videoProps } = useVideoHandlers({
-    videoRef,
-    currentEpisode,
-    initialPosition,
-    introEndTime,
-    playbackRate,
-    handlePlaybackStatusUpdate,
-    detail: detail || undefined,
+  logger.info(`[PlayScreen] Store state - isLoading: ${isLoading}, hasCurrentEpisode: ${!!currentEpisode}, episodeUrl: ${currentEpisode?.url?.substring(0, 50)}...`);
+
+  // 打印 expo-video 状态
+  logger.info(`[PlayScreen] expo-video status - loaded: ${videoModuleLoaded}, error: ${videoModuleError}, hasHook: ${!!useVideoPlayerHook}`);
+
+  // 创建 video player
+  const videoSource = currentEpisode?.url || null;
+  logger.info(`[PlayScreen] Creating player with source: ${videoSource ? videoSource.substring(0, 80) + '...' : 'null'}`);
+
+  const player = useVideoPlayer(videoSource, (p: any) => {
+    if (!p) {
+      logger.warn('[PlayScreen] Player setup callback received null player');
+      return;
+    }
+    logger.info('[PlayScreen] Player setup callback - configuring player');
+    p.loop = false;
+    p.playbackRate = playbackRate;
+    // 设置时间更新间隔 (expo-video 1.x 可能不支持此属性)
+    if ('timeUpdateEventInterval' in p) {
+      p.timeUpdateEventInterval = 1;
+    }
   });
 
-  // TV遥控器处理 - 总是调用hook，但根据设备类型决定是否使用结果
+  logger.info(`[PlayScreen] Player created: ${player ? 'success' : 'null'}, player type: ${typeof player}`);
+
+  // 轮询状态更新
+  const lastStatus = useRef<string>('idle');
+  const hasSetInitialPosition = useRef(false);
+  const lastUrl = useRef<string | null>(null);
+
+  // 当 URL 变化时重置
+  useEffect(() => {
+    if (currentEpisode?.url && currentEpisode.url !== lastUrl.current) {
+      hasSetInitialPosition.current = false;
+      lastUrl.current = currentEpisode.url;
+      logger.info(`[PlayScreen] URL changed to: ${currentEpisode.url.substring(0, 100)}...`);
+    }
+  }, [currentEpisode?.url]);
+
+  // 播放速度变化
+  useEffect(() => {
+    if (player && playbackRate) {
+      player.playbackRate = playbackRate;
+    }
+  }, [player, playbackRate]);
+
+  // 状态轮询
+  useEffect(() => {
+    if (!player) {
+      logger.info('[PlayScreen] No player, skipping status polling');
+      return;
+    }
+
+    logger.info('[PlayScreen] Starting status polling...');
+
+    const interval = setInterval(() => {
+      try {
+        const currentStatus = player.status;
+
+        if (currentStatus !== lastStatus.current) {
+          logger.info(`[PlayScreen] Player status: ${lastStatus.current} -> ${currentStatus}`);
+          lastStatus.current = currentStatus;
+
+          if (currentStatus === 'readyToPlay') {
+            usePlayerStore.setState({ isLoading: false });
+
+            if (!hasSetInitialPosition.current) {
+              const jumpPosition = initialPosition || introEndTime || 0;
+              if (jumpPosition > 0) {
+                const jumpSeconds = jumpPosition / 1000;
+                logger.info(`[PlayScreen] Seeking to ${jumpSeconds}s`);
+                player.currentTime = jumpSeconds;
+              }
+              hasSetInitialPosition.current = true;
+            }
+
+            player.play();
+          } else if (currentStatus === 'loading') {
+            usePlayerStore.setState({ isLoading: true });
+          } else if (currentStatus === 'error') {
+            logger.error('[PlayScreen] Player error state');
+            Toast.show({ type: "error", text1: "视频播放失败" });
+          }
+        }
+
+        if (currentStatus === 'readyToPlay') {
+          const positionMillis = (player.currentTime || 0) * 1000;
+          const durationMillis = (player.duration || 0) * 1000;
+
+          usePlayerStore.getState().handlePlaybackStatusUpdate({
+            isLoaded: true,
+            isPlaying: player.playing,
+            positionMillis,
+            durationMillis,
+            didJustFinish: false,
+          });
+        }
+      } catch (error) {
+        logger.error('[PlayScreen] Error in status polling:', error);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [player, initialPosition, introEndTime]);
+
+  // 设置 player 到 store
+  useEffect(() => {
+    if (player) {
+      logger.info('[PlayScreen] Setting player to store');
+      setPlayer(player);
+    }
+  }, [player, setPlayer]);
+
+  // 设置 videoViewRef 到 store
+  useEffect(() => {
+    if (videoViewRef.current) {
+      setVideoViewRef(videoViewRef);
+    }
+  }, [setVideoViewRef]);
+
+  // TV遥控器处理
   const tvRemoteHandler = useTVRemoteHandler();
 
-  // 优化的动态样式 - 使用useMemo避免重复计算
+  // 动态样式
   const dynamicStyles = useMemo(() => createResponsiveStyles(deviceType), [deviceType]);
 
+  // 屏幕方向
   useEffect(() => {
     if (Platform.isTV) return;
 
@@ -145,8 +344,9 @@ export default function PlayScreen() {
       try {
         await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
         setIsLandscape(true);
+        logger.info('[PlayScreen] Locked to landscape');
       } catch (error) {
-        logger.debug("Failed to lock initial orientation", error);
+        logger.error('[PlayScreen] Failed to lock orientation:', error);
       }
     };
 
@@ -171,7 +371,7 @@ export default function PlayScreen() {
         setIsLandscape(true);
       }
     } catch (error) {
-      logger.debug("Failed to toggle orientation", error);
+      logger.error('[PlayScreen] Failed to toggle orientation:', error);
       Toast.show({ type: "error", text1: "切换横竖屏失败" });
     } finally {
       isTogglingOrientationRef.current = false;
@@ -186,7 +386,26 @@ export default function PlayScreen() {
     void toggleOrientation();
   }, [setShowControls, setShowEpisodeModal, setShowSourceModal, setShowSpeedModal, toggleOrientation]);
 
+  // 画中画按钮处理
+  const onPiPPress = useCallback(async () => {
+    logger.info('[PlayScreen] PiP button pressed');
+    setShowControls(false);
+    await startPictureInPicture();
+  }, [setShowControls, startPictureInPicture]);
+
+  // PiP 事件回调
+  const onPictureInPictureStart = useCallback(() => {
+    logger.info('[PlayScreen] Entered PiP mode');
+    setIsInPiP(true);
+  }, [setIsInPiP]);
+
+  const onPictureInPictureStop = useCallback(() => {
+    logger.info('[PlayScreen] Exited PiP mode');
+    setIsInPiP(false);
+  }, [setIsInPiP]);
+
   const onBackPress = useCallback(() => {
+    logger.info('[PlayScreen] Back button pressed');
     if (showEpisodeModal) {
       setShowEpisodeModal(false);
       return;
@@ -199,7 +418,6 @@ export default function PlayScreen() {
       setShowSpeedModal(false);
       return;
     }
-
     router.back();
   }, [router, setShowEpisodeModal, setShowSourceModal, setShowSpeedModal, showEpisodeModal, showSourceModal, showSpeedModal]);
 
@@ -215,28 +433,23 @@ export default function PlayScreen() {
     }, CONTROLS_TIMEOUT);
   }, [deviceType, setShowControls]);
 
+  // 加载视频
   useEffect(() => {
-    const perfStart = performance.now();
-    logger.info(`[PERF] PlayScreen useEffect START - source: ${source}, id: ${id}, title: ${title}`);
+    logger.info(`[PlayScreen] loadVideo effect - source: ${source}, id: ${id}, title: ${title}`);
 
-    setVideoRef(videoRef);
     if (source && id && title) {
-      logger.info(`[PERF] Calling loadVideo with episodeIndex: ${episodeIndex}, position: ${position}`);
       loadVideo({ source, id, episodeIndex, position, title });
     } else {
-      logger.info(`[PERF] Missing required params - source: ${!!source}, id: ${!!id}, title: ${!!title}`);
+      logger.warn('[PlayScreen] Missing required params for loadVideo');
     }
 
-    const perfEnd = performance.now();
-    logger.info(`[PERF] PlayScreen useEffect END - took ${(perfEnd - perfStart).toFixed(2)}ms`);
-
     return () => {
-      logger.info(`[PERF] PlayScreen unmounting - calling reset()`);
-      reset(); // Reset state when component unmounts
+      logger.info('[PlayScreen] Unmounting, calling reset');
+      reset();
     };
-  }, [episodeIndex, source, position, setVideoRef, reset, loadVideo, id, title]);
+  }, [episodeIndex, source, position, reset, loadVideo, id, title]);
 
-  // 优化的屏幕点击处理
+  // 屏幕点击处理
   const onScreenPress = useCallback(() => {
     if (deviceType === "tv") {
       tvRemoteHandler.onScreenPress();
@@ -252,6 +465,7 @@ export default function PlayScreen() {
     }
   }, [deviceType, tvRemoteHandler, setShowControls, showControls, resetControlsTimer]);
 
+  // 控制栏定时器
   useEffect(() => {
     if (deviceType === "tv") return;
     if (!showControls) return;
@@ -266,20 +480,22 @@ export default function PlayScreen() {
     };
   }, [deviceType, showControls, resetControlsTimer]);
 
+  // App 状态变化 - 自动进入 PiP
   useEffect(() => {
+    if (Platform.isTV || !isTouchDevice) return;
+
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === "background" || nextAppState === "inactive") {
-        videoRef.current?.pauseAsync();
+        logger.info('[PlayScreen] App going to background, starting PiP');
+        startPictureInPicture();
       }
     };
 
     const subscription = AppState.addEventListener("change", handleAppStateChange);
+    return () => subscription.remove();
+  }, [isTouchDevice, startPictureInPicture]);
 
-    return () => {
-      subscription.remove();
-    };
-  }, []);
-
+  // 返回键处理
   useEffect(() => {
     const backAction = () => {
       if (showEpisodeModal) {
@@ -303,10 +519,10 @@ export default function PlayScreen() {
     };
 
     const backHandler = BackHandler.addEventListener("hardwareBackPress", backAction);
-
     return () => backHandler.remove();
   }, [router, setShowControls, setShowEpisodeModal, setShowSourceModal, setShowSpeedModal, showControls, showEpisodeModal, showSourceModal, showSpeedModal]);
 
+  // 超时处理
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null;
 
@@ -316,7 +532,7 @@ export default function PlayScreen() {
           usePlayerStore.setState({ isLoading: false });
           Toast.show({ type: "error", text1: "播放超时，请重试" });
         }
-      }, 60000); // 1 minute
+      }, 60000);
     }
 
     return () => {
@@ -326,9 +542,26 @@ export default function PlayScreen() {
     };
   }, [isLoading]);
 
+  // 检查 expo-video 是否可用
+  if (videoModuleError) {
+    logger.error('[PlayScreen] expo-video not available:', videoModuleError);
+    return (
+      <View style={dynamicStyles.errorContainer}>
+        <Text style={dynamicStyles.errorText}>
+          视频播放器不可用{'\n\n'}
+          请运行 "yarn prebuild-ios" 后重新编译应用{'\n\n'}
+          错误: {videoModuleError}
+        </Text>
+      </View>
+    );
+  }
+
   if (!detail) {
+    logger.info('[PlayScreen] No detail, showing loading');
     return <VideoLoadingAnimation showProgressBar />;
   }
+
+  logger.info(`[PlayScreen] Rendering main content, hasPlayer: ${!!player}, hasVideoView: ${!!VideoView}`);
 
   return (
     <ThemedView focusable style={dynamicStyles.container}>
@@ -337,9 +570,19 @@ export default function PlayScreen() {
         style={dynamicStyles.videoContainer}
         onPress={onScreenPress}
       >
-        {/* 条件渲染Video组件：只有在有有效URL时才渲染 */}
-        {currentEpisode?.url ? (
-          <Video ref={videoRef} style={dynamicStyles.videoPlayer} {...videoProps} />
+        {/* 使用 expo-video 的 VideoView */}
+        {currentEpisode?.url && player && VideoView ? (
+          <VideoView
+            ref={videoViewRef}
+            style={dynamicStyles.videoPlayer}
+            player={player}
+            contentFit="contain"
+            nativeControls={false}
+            allowsPictureInPicture={isTouchDevice}
+            startsPictureInPictureAutomatically={isTouchDevice}
+            onPictureInPictureStart={onPictureInPictureStart}
+            onPictureInPictureStop={onPictureInPictureStop}
+          />
         ) : (
           <LoadingContainer style={dynamicStyles.loadingContainer} currentEpisode={currentEpisode} />
         )}
@@ -352,24 +595,34 @@ export default function PlayScreen() {
             onBack={onBackPress}
             isLandscape={isLandscape}
             onToggleOrientation={onToggleOrientationPress}
+            onPiPPress={onPiPPress}
           />
         )}
 
         <SeekingBar />
 
-        {/* 只在Video组件存在且正在加载时显示加载动画覆盖层 */}
+        {/* 加载动画覆盖层 */}
         {currentEpisode?.url && isLoading && (
           <View style={dynamicStyles.loadingContainer}>
             <VideoLoadingAnimation showProgressBar />
           </View>
         )}
-
-        {/* <NextEpisodeOverlay visible={showNextEpisodeOverlay} onCancel={() => setShowNextEpisodeOverlay(false)} /> */}
       </TouchableOpacity>
 
       <EpisodeSelectionModal />
       <SourceSelectionModal />
       <SpeedSelectionModal />
     </ThemedView>
+  );
+}
+
+// 主导出组件（带错误边界）
+export default function PlayScreen() {
+  logger.info('[PlayScreen] Main component rendering');
+
+  return (
+    <ErrorBoundary>
+      <PlayScreenContent />
+    </ErrorBoundary>
   );
 }

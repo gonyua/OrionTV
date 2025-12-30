@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   RectangleHorizontal,
   RectangleVertical,
+  PictureInPicture2,
 } from "lucide-react-native";
 import { ThemedText } from "@/components/ThemedText";
 import { MediaButton } from "@/components/MediaButton";
@@ -30,6 +31,7 @@ interface PlayerControlsProps {
   onBack?: () => void;
   isLandscape?: boolean;
   onToggleOrientation?: () => void;
+  onPiPPress?: () => void;
 }
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
@@ -39,6 +41,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onBack,
   isLandscape,
   onToggleOrientation,
+  onPiPPress,
 }) => {
   const {
     currentEpisodeIndex,
@@ -132,6 +135,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             <StyledButton
               variant="ghost"
               onPress={() => {
+                onPiPPress?.();
+              }}
+              buttonStyle={styles.topIconButton}
+              accessibilityLabel="画中画"
+            >
+              <PictureInPicture2 color="white" size={20} />
+            </StyledButton>
+            <StyledButton
+              variant="ghost"
+              onPress={() => {
                 onToggleOrientation?.();
               }}
               buttonStyle={styles.topIconButton}
@@ -159,7 +172,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
         <ThemedText style={{ color: "white", marginTop: 5 }}>
           {status?.isLoaded
-            ? `${formatTime(status.positionMillis)} / ${formatTime(status.durationMillis || 0)}`
+            ? `${formatTime(status.positionMillis || 0)} / ${formatTime(status.durationMillis || 0)}`
             : "00:00 / 00:00"}
         </ThemedText>
 
@@ -218,8 +231,9 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   topSideContainerRight: {
-    width: 96,
-    alignItems: "flex-end",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   topIconButton: {
     paddingHorizontal: 10,
