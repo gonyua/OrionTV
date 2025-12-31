@@ -3,6 +3,7 @@ import { StyleSheet, BackHandler, AppState, AppStateStatus, View, Platform, Text
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
+import { Video, ResizeMode, AVPlaybackStatus } from "expo-av";
 import { ThemedView } from "@/components/ThemedView";
 import { PlayerControls } from "@/components/PlayerControls";
 import { EpisodeSelectionModal } from "@/components/EpisodeSelectionModal";
@@ -14,6 +15,7 @@ import useDetailStore from "@/stores/detailStore";
 import { useTVRemoteHandler } from "@/hooks/useTVRemoteHandler";
 import Toast from "react-native-toast-message";
 import usePlayerStore, { selectCurrentEpisode } from "@/stores/playerStore";
+import type { PlayerLike } from "@/stores/playerStore";
 import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 import Logger from '@/utils/Logger';
 
@@ -25,18 +27,24 @@ let useVideoPlayerHook: ((source: any, setup?: any) => any) | null = null;
 let videoModuleError: string | null = null;
 let videoModuleLoaded = false;
 
-try {
-  const expoVideo = require('expo-video');
-  VideoView = expoVideo.VideoView;
-  useVideoPlayerHook = expoVideo.useVideoPlayer;
-  videoModuleLoaded = true;
-  console.log('[PlayScreen] expo-video module loaded:', {
-    hasVideoView: !!VideoView,
-    hasUseVideoPlayer: !!useVideoPlayerHook,
-  });
-} catch (error: any) {
-  videoModuleError = error?.message || 'Failed to load expo-video';
-  console.error('[PlayScreen] Failed to load expo-video:', error);
+const isTvPlatform = !!Platform.isTV;
+
+if (!isTvPlatform) {
+  try {
+    const expoVideo = require('expo-video');
+    VideoView = expoVideo.VideoView;
+    useVideoPlayerHook = expoVideo.useVideoPlayer;
+    videoModuleLoaded = true;
+    console.log('[PlayScreen] expo-video module loaded:', {
+      hasVideoView: !!VideoView,
+      hasUseVideoPlayer: !!useVideoPlayerHook,
+    });
+  } catch (error: any) {
+    videoModuleError = error?.message || 'Failed to load expo-video';
+    console.error('[PlayScreen] Failed to load expo-video:', error);
+  }
+} else {
+  logger.info('[PlayScreen] TV platform detected, using expo-av for video playback');
 }
 
 // 创建一个空的 hook 作为 fallback
@@ -49,6 +57,81 @@ const useVideoPlayerFallback = (source: any, setup?: any) => {
 const useVideoPlayer = useVideoPlayerHook || useVideoPlayerFallback;
 
 const CONTROLS_TIMEOUT = 5000;
+
+function createExpoAvPlayerAdapter(
+  videoRef: React.RefObject<Video>,
+  statusRef: React.MutableRefObject<AVPlaybackStatus | null>
+): PlayerLike & {
+  duration?: number;
+  playing?: boolean;
+  status?: string;
+} {
+  const player: any = {};
+
+  Object.defineProperties(player, {
+    currentTime: {
+      get: () => {
+        const status = statusRef.current;
+        if (!status || !status.isLoaded) return 0;
+        return (status.positionMillis ?? 0) / 1000;
+      },
+      set: (seconds: number) => {
+        const positionMillis = Math.max(0, Math.floor((seconds || 0) * 1000));
+        void videoRef.current?.setPositionAsync(positionMillis);
+      },
+      enumerable: true,
+    },
+    duration: {
+      get: () => {
+        const status = statusRef.current;
+        if (!status || !status.isLoaded) return 0;
+        return (status.durationMillis ?? 0) / 1000;
+      },
+      enumerable: true,
+    },
+    playing: {
+      get: () => {
+        const status = statusRef.current;
+        if (!status || !status.isLoaded) return false;
+        return !!status.isPlaying;
+      },
+      enumerable: true,
+    },
+    playbackRate: {
+      get: () => {
+        const status = statusRef.current;
+        if (!status || !status.isLoaded) return 1.0;
+        return status.rate ?? 1.0;
+      },
+      set: (rate: number) => {
+        void videoRef.current?.setRateAsync(rate || 1.0, true);
+      },
+      enumerable: true,
+    },
+    status: {
+      get: () => {
+        const status = statusRef.current;
+        if (!status) return "loading";
+        if (!status.isLoaded) {
+          return status.error ? "error" : "loading";
+        }
+        if (status.isBuffering) return "loading";
+        return "readyToPlay";
+      },
+      enumerable: true,
+    },
+  });
+
+  player.play = () => {
+    void videoRef.current?.playAsync();
+  };
+
+  player.pause = () => {
+    void videoRef.current?.pauseAsync();
+  };
+
+  return player as PlayerLike & { duration?: number; playing?: boolean; status?: string };
+}
 
 // 错误边界组件
 interface ErrorBoundaryProps {
@@ -217,11 +300,24 @@ function PlayScreenContent() {
   // 打印 expo-video 状态
   logger.info(`[PlayScreen] expo-video status - loaded: ${videoModuleLoaded}, error: ${videoModuleError}, hasHook: ${!!useVideoPlayerHook}`);
 
+  const shouldUseExpoAv = isTvPlatform || !!videoModuleError;
+  const expoAvStatusRef = useRef<AVPlaybackStatus | null>(null);
+  const expoAvPlayerRef = useRef<
+    (PlayerLike & { duration?: number; playing?: boolean; status?: string }) | null
+  >(null);
+
+  if (!expoAvPlayerRef.current) {
+    expoAvPlayerRef.current = createExpoAvPlayerAdapter(
+      videoViewRef as unknown as React.RefObject<Video>,
+      expoAvStatusRef
+    );
+  }
+
   // 创建 video player
   const videoSource = currentEpisode?.url || null;
   logger.info(`[PlayScreen] Creating player with source: ${videoSource ? videoSource.substring(0, 80) + '...' : 'null'}`);
 
-  const player = useVideoPlayer(videoSource, (p: any) => {
+  const expoVideoPlayer = useVideoPlayer(videoSource, (p: any) => {
     if (!p) {
       logger.warn('[PlayScreen] Player setup callback received null player');
       return;
@@ -235,7 +331,8 @@ function PlayScreenContent() {
     }
   });
 
-  logger.info(`[PlayScreen] Player created: ${player ? 'success' : 'null'}, player type: ${typeof player}`);
+  const player = shouldUseExpoAv ? expoAvPlayerRef.current : expoVideoPlayer;
+  logger.info(`[PlayScreen] Player created: ${player ? 'success' : 'null'}, player type: ${typeof player}, engine: ${shouldUseExpoAv ? 'expo-av' : 'expo-video'}`);
 
   // 轮询状态更新
   const lastStatus = useRef<string>('idle');
@@ -260,6 +357,9 @@ function PlayScreenContent() {
 
   // 状态轮询
   useEffect(() => {
+    if (shouldUseExpoAv) {
+      return;
+    }
     if (!player) {
       logger.info('[PlayScreen] No player, skipping status polling');
       return;
@@ -315,13 +415,55 @@ function PlayScreenContent() {
     }, 500);
 
     return () => clearInterval(interval);
-  }, [player, initialPosition, introEndTime]);
+  }, [shouldUseExpoAv, player, initialPosition, introEndTime]);
+
+  const onExpoAvPlaybackStatusUpdate = useCallback(
+    (status: AVPlaybackStatus) => {
+      expoAvStatusRef.current = status;
+
+      if (!status.isLoaded) {
+        usePlayerStore.getState().handlePlaybackStatusUpdate({
+          isLoaded: false,
+          error: status.error,
+        });
+        if (status.error) {
+          logger.error('[PlayScreen] expo-av playback error:', status.error);
+          Toast.show({ type: "error", text1: "视频播放失败" });
+        }
+        return;
+      }
+
+      if (status.isBuffering) {
+        usePlayerStore.setState({ isLoading: true });
+      } else if (status.isPlaying) {
+        usePlayerStore.setState({ isLoading: false });
+      }
+
+      if (!hasSetInitialPosition.current) {
+        const jumpPosition = initialPosition || introEndTime || 0;
+        if (jumpPosition > 0) {
+          logger.info(`[PlayScreen] (expo-av) Seeking to ${(jumpPosition / 1000).toFixed(2)}s`);
+          void videoViewRef.current?.setPositionAsync(jumpPosition);
+        }
+        hasSetInitialPosition.current = true;
+      }
+
+      usePlayerStore.getState().handlePlaybackStatusUpdate({
+        isLoaded: true,
+        isPlaying: status.isPlaying,
+        positionMillis: status.positionMillis ?? 0,
+        durationMillis: status.durationMillis ?? 0,
+        didJustFinish: status.didJustFinish ?? false,
+      });
+    },
+    [initialPosition, introEndTime]
+  );
 
   // 设置 player 到 store
   useEffect(() => {
     if (player) {
       logger.info('[PlayScreen] Setting player to store');
-      setPlayer(player);
+      setPlayer(player as PlayerLike);
     }
   }, [player, setPlayer]);
 
@@ -330,7 +472,7 @@ function PlayScreenContent() {
     if (videoViewRef.current) {
       setVideoViewRef(videoViewRef);
     }
-  }, [setVideoViewRef]);
+  }, [setVideoViewRef, player, currentEpisode?.url]);
 
   // TV遥控器处理
   const tvRemoteHandler = useTVRemoteHandler();
@@ -568,43 +710,50 @@ function PlayScreenContent() {
     };
   }, [isLoading]);
 
-  // 检查 expo-video 是否可用
-  if (videoModuleError) {
-    logger.error('[PlayScreen] expo-video not available:', videoModuleError);
-    return (
-      <View style={dynamicStyles.errorContainer}>
-        <Text style={dynamicStyles.errorText}>
-          视频播放器不可用{'\n\n'}
-          请运行 "yarn prebuild-ios" 后重新编译应用{'\n\n'}
-          错误: {videoModuleError}
-        </Text>
-      </View>
-    );
-  }
-
   if (!detail) {
     logger.info('[PlayScreen] No detail, showing loading');
     return <VideoLoadingAnimation showProgressBar />;
   }
 
-  logger.info(`[PlayScreen] Rendering main content, hasPlayer: ${!!player}, hasVideoView: ${!!VideoView}`);
+  logger.info(
+    `[PlayScreen] Rendering main content, engine: ${shouldUseExpoAv ? 'expo-av' : 'expo-video'}, hasPlayer: ${!!player}, hasVideoView: ${!!VideoView}`
+  );
 
   return (
     <ThemedView focusable style={dynamicStyles.container}>
       <View style={dynamicStyles.videoContainer}>
-        {/* 使用 expo-video 的 VideoView */}
-        {currentEpisode?.url && player && VideoView ? (
-          <VideoView
-            ref={videoViewRef}
-            style={dynamicStyles.videoPlayer}
-            player={player}
-            contentFit={videoContentFit}
-            nativeControls={false}
-            allowsPictureInPicture={isTouchDevice}
-            startsPictureInPictureAutomatically={isTouchDevice}
-            onPictureInPictureStart={onPictureInPictureStart}
-            onPictureInPictureStop={onPictureInPictureStop}
-          />
+        {currentEpisode?.url ? (
+          shouldUseExpoAv ? (
+            <Video
+              key={currentEpisode.url}
+              ref={videoViewRef}
+              style={dynamicStyles.videoPlayer}
+              source={{ uri: currentEpisode.url }}
+              resizeMode={videoContentFit === "cover" ? ResizeMode.COVER : ResizeMode.CONTAIN}
+              shouldPlay
+              isLooping={false}
+              useNativeControls={false}
+              progressUpdateIntervalMillis={500}
+              onPlaybackStatusUpdate={onExpoAvPlaybackStatusUpdate}
+              onError={() => {
+                Toast.show({ type: "error", text1: "视频播放失败" });
+              }}
+            />
+          ) : player && VideoView ? (
+            <VideoView
+              ref={videoViewRef}
+              style={dynamicStyles.videoPlayer}
+              player={player}
+              contentFit={videoContentFit}
+              nativeControls={false}
+              allowsPictureInPicture={isTouchDevice}
+              startsPictureInPictureAutomatically={isTouchDevice}
+              onPictureInPictureStart={onPictureInPictureStart}
+              onPictureInPictureStop={onPictureInPictureStop}
+            />
+          ) : (
+            <LoadingContainer style={dynamicStyles.loadingContainer} currentEpisode={currentEpisode} />
+          )
         ) : (
           <LoadingContainer style={dynamicStyles.loadingContainer} currentEpisode={currentEpisode} />
         )}

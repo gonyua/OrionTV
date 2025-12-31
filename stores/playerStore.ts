@@ -1,12 +1,18 @@
 import { create } from "zustand";
 import Toast from "react-native-toast-message";
-import { VideoPlayer } from "expo-video";
 import { RefObject } from "react";
 import { PlayRecord, PlayRecordManager, PlayerSettingsManager } from "@/services/storage";
 import useDetailStore, { episodesSelectorBySource } from "./detailStore";
 import Logger from '@/utils/Logger';
 
 const logger = Logger.withTag('PlayerStore');
+
+export type PlayerLike = {
+  play: () => void;
+  pause: () => void;
+  currentTime: number;
+  playbackRate: number;
+};
 
 interface Episode {
   url: string;
@@ -24,7 +30,7 @@ interface PlaybackStatus {
 }
 
 interface PlayerState {
-  player: VideoPlayer | null;
+  player: PlayerLike | null;
   videoViewRef: RefObject<any> | null;
   currentEpisodeIndex: number;
   episodes: Episode[];
@@ -43,7 +49,7 @@ interface PlayerState {
   introEndTime?: number;
   outroStartTime?: number;
   isInPiP: boolean;
-  setPlayer: (player: VideoPlayer | null) => void;
+  setPlayer: (player: PlayerLike | null) => void;
   setVideoViewRef: (ref: RefObject<any>) => void;
   loadVideo: (options: {
     source: string;
