@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
-import { useTVEventHandler, HWEvent } from "react-native";
+import { useTVEventHandler, HWEvent, Platform } from "react-native";
 import usePlayerStore from "@/stores/playerStore";
 
 const SEEK_STEP = 20 * 1000; // 快进/快退的时间步长（毫秒）
@@ -13,12 +13,14 @@ const CONTROLS_TIMEOUT = 5000;
  */
 export const useTVRemoteHandler = () => {
   const { showControls, setShowControls, showEpisodeModal, togglePlayPause, seek } = usePlayerStore();
+  const isTV = Platform.isTV;
 
   const controlsTimer = useRef<NodeJS.Timeout | null>(null);
   const fastForwardIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // 重置或启动隐藏控件的定时器
   const resetTimer = useCallback(() => {
+    if (!isTV) return;
     // 清除之前的定时器
     if (controlsTimer.current) {
       clearTimeout(controlsTimer.current);
@@ -27,10 +29,18 @@ export const useTVRemoteHandler = () => {
     controlsTimer.current = setTimeout(() => {
       setShowControls(false);
     }, CONTROLS_TIMEOUT);
-  }, [setShowControls]);
+  }, [isTV, setShowControls]);
 
   // 当控件显示时，启动定时器
   useEffect(() => {
+    if (!isTV) {
+      if (controlsTimer.current) {
+        clearTimeout(controlsTimer.current);
+        controlsTimer.current = null;
+      }
+      return;
+    }
+
     if (showControls) {
       resetTimer();
     } else {
@@ -46,20 +56,22 @@ export const useTVRemoteHandler = () => {
         clearTimeout(controlsTimer.current);
       }
     };
-  }, [showControls, resetTimer]);
+  }, [isTV, showControls, resetTimer]);
 
   // 组件卸载时清除快进定时器
   useEffect(() => {
+    if (!isTV) return;
     return () => {
       if (fastForwardIntervalRef.current) {
         clearInterval(fastForwardIntervalRef.current);
       }
     };
-  }, []);
+  }, [isTV]);
 
   // 处理遥控器事件
   const handleTVEvent = useCallback(
     (event: HWEvent) => {
+      if (!isTV) return;
       if (showEpisodeModal) {
         return;
       }
@@ -112,13 +124,14 @@ export const useTVRemoteHandler = () => {
           break;
       }
     },
-    [showControls, showEpisodeModal, setShowControls, resetTimer, togglePlayPause, seek]
+    [isTV, showControls, showEpisodeModal, setShowControls, resetTimer, togglePlayPause, seek]
   );
 
   useTVEventHandler(handleTVEvent);
 
   // 处理屏幕点击事件
   const onScreenPress = () => {
+    if (!isTV) return;
     // 切换控件的显示状态
     const newShowControls = !showControls;
     setShowControls(newShowControls);

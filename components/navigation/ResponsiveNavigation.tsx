@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import MobileTabContainer from './MobileTabContainer';
 import TabletSidebarNavigator from './TabletSidebarNavigator';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 interface ResponsiveNavigationProps {
   children: React.ReactNode;
@@ -10,6 +11,8 @@ interface ResponsiveNavigationProps {
 
 const ResponsiveNavigation: React.FC<ResponsiveNavigationProps> = ({ children }) => {
   const { deviceType } = useResponsiveLayout();
+  const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
+  const setSidebarCollapsed = useSettingsStore((state) => state.setSidebarCollapsed);
 
   switch (deviceType) {
     case 'mobile':
@@ -18,7 +21,7 @@ const ResponsiveNavigation: React.FC<ResponsiveNavigationProps> = ({ children })
     
     case 'tablet':
       return (
-        <TabletSidebarNavigator>
+        <TabletSidebarNavigator collapsed={sidebarCollapsed} onToggleCollapse={setSidebarCollapsed}>
           {children}
         </TabletSidebarNavigator>
       );

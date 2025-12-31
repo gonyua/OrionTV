@@ -1,11 +1,13 @@
-import React, { useMemo } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import { View, Text, StyleSheet, PanResponder, Platform } from "react-native";
 import {
   Pause,
   Play,
   SkipForward,
   List,
   Tv,
+  Expand,
+  Shrink,
   ArrowDownToDot,
   ArrowUpFromDot,
   Gauge,
@@ -22,12 +24,15 @@ import { StyledButton } from "./StyledButton";
 import usePlayerStore from "@/stores/playerStore";
 import useDetailStore from "@/stores/detailStore";
 import { useSources } from "@/stores/sourceStore";
-import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 
 interface PlayerControlsProps {
   showControls: boolean;
   setShowControls: (show: boolean) => void;
+  isVideoFitCover?: boolean;
+  onToggleVideoFit?: () => void;
   onUserActivity?: () => void;
+  onInteractionStart?: () => void;
+  onInteractionEnd?: () => void;
   onBack?: () => void;
   isLandscape?: boolean;
   onToggleOrientation?: () => void;
@@ -37,7 +42,11 @@ interface PlayerControlsProps {
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
   showControls,
   setShowControls,
+  isVideoFitCover,
+  onToggleVideoFit,
   onUserActivity,
+  onInteractionStart,
+  onInteractionEnd,
   onBack,
   isLandscape,
   onToggleOrientation,
@@ -62,12 +71,18 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     outroStartTime,
   } = usePlayerStore();
 
-  const { deviceType } = useResponsiveLayout();
   const insets = useSafeAreaInsets();
-  const isTouchDevice = deviceType !== "tv";
+  const isTouchDevice = !Platform.isTV;
 
   const { detail } = useDetailStore();
   const resources = useSources();
+
+  const progressBarContainerRef = useRef<View | null>(null);
+  const progressBarPageXRef = useRef(0);
+  const progressBarWidthRef = useRef(0);
+  const hasProgressBarMeasurementRef = useRef(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubPosition, setScrubPosition] = useState(0);
 
   const videoTitle = detail?.title || "";
   const currentEpisode = episodes[currentEpisodeIndex];
@@ -84,6 +99,111 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   };
 
+  const getScrubPosition = useCallback((evt: any, gestureState?: any) => {
+    const width = progressBarWidthRef.current;
+    if (!width) return 0;
+    const pageX =
+      typeof gestureState?.moveX === "number"
+        ? gestureState.moveX
+        : typeof evt?.nativeEvent?.pageX === "number"
+          ? evt.nativeEvent.pageX
+          : null;
+
+    if (hasProgressBarMeasurementRef.current && typeof pageX === "number") {
+      const ratio = (pageX - progressBarPageXRef.current) / width;
+      return Math.max(0, Math.min(1, ratio));
+    }
+
+    const x = evt?.nativeEvent?.locationX ?? 0;
+    const ratio = x / width;
+    return Math.max(0, Math.min(1, ratio));
+  }, []);
+
+  const seekToScrubPosition = useCallback(
+    async (ratio: number) => {
+      if (!status?.isLoaded || !status.durationMillis) return;
+
+      const { player } = usePlayerStore.getState();
+      if (!player) return;
+
+      const newPositionMs = ratio * status.durationMillis;
+      try {
+        player.currentTime = newPositionMs / 1000;
+        player.play();
+      } catch {
+        // 忽略：轮询会在下一次更新状态
+      }
+
+      // 立即同步 UI，避免松手后短暂回跳
+      usePlayerStore.setState((state) => ({
+        status: state.status ? { ...state.status, positionMillis: newPositionMs, isPlaying: true } : state.status,
+        progressPosition: ratio,
+      }));
+    },
+    [status?.durationMillis, status?.isLoaded]
+  );
+
+  const panResponder = useMemo(() => {
+    if (!isTouchDevice) return null;
+
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (evt) => {
+        onInteractionStart?.();
+        setIsScrubbing(true);
+        const ratio = getScrubPosition(evt);
+        setScrubPosition(ratio);
+
+        const pageX = evt?.nativeEvent?.pageX;
+        const container = progressBarContainerRef.current;
+        if (container && typeof pageX === "number") {
+          const startPageX = pageX;
+          container.measureInWindow((x, _y, width) => {
+            progressBarPageXRef.current = x;
+            if (width) {
+              progressBarWidthRef.current = width;
+              hasProgressBarMeasurementRef.current = true;
+            }
+            if (width) {
+              const adjustedRatio = Math.max(0, Math.min(1, (startPageX - x) / width));
+              setScrubPosition(adjustedRatio);
+            }
+          });
+        }
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const ratio = getScrubPosition(evt, gestureState);
+        setScrubPosition(ratio);
+      },
+      onPanResponderRelease: async (evt, gestureState) => {
+        const ratio = getScrubPosition(evt, gestureState);
+        setScrubPosition(ratio);
+        setIsScrubbing(false);
+        onInteractionEnd?.();
+        onUserActivity?.();
+        await seekToScrubPosition(ratio);
+      },
+      onPanResponderTerminate: async (evt, gestureState) => {
+        const ratio = getScrubPosition(evt, gestureState);
+        setScrubPosition(ratio);
+        setIsScrubbing(false);
+        onInteractionEnd?.();
+        onUserActivity?.();
+        await seekToScrubPosition(ratio);
+      },
+      onShouldBlockNativeResponder: () => true,
+    });
+  }, [getScrubPosition, isTouchDevice, onInteractionEnd, onInteractionStart, onUserActivity, seekToScrubPosition]);
+
+  const displayedProgressPosition = isTouchDevice ? (isScrubbing ? scrubPosition : progressPosition) : isSeeking ? seekPosition : progressPosition;
+  const durationMillis = status?.durationMillis || 0;
+  const displayedPositionMillis =
+    isTouchDevice && isScrubbing && status?.isLoaded && durationMillis ? displayedProgressPosition * durationMillis : status?.positionMillis || 0;
+
   const onPlayNextEpisode = () => {
     if (hasNextEpisode) {
       playEpisode(currentEpisodeIndex + 1);
@@ -96,7 +216,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   };
 
   const overlayStyle = useMemo(() => {
-    if (deviceType === "tv") return styles.controlsOverlay;
+    if (!isTouchDevice) return styles.controlsOverlay;
 
     return [
       styles.controlsOverlay,
@@ -107,10 +227,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         paddingRight: 20 + insets.right,
       },
     ];
-  }, [deviceType, insets.bottom, insets.left, insets.right, insets.top]);
+  }, [insets.bottom, insets.left, insets.right, insets.top, isTouchDevice]);
 
   return (
-    <View style={overlayStyle}>
+    <View style={overlayStyle} pointerEvents="box-none">
       <View style={styles.topControls}>
         {isTouchDevice && (
           <View style={styles.topSideContainerLeft}>
@@ -144,6 +264,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             </StyledButton>
             <StyledButton
               variant="ghost"
+              onPress={runWithActivity(() => {
+                onToggleVideoFit?.();
+              })}
+              buttonStyle={styles.topIconButton}
+              accessibilityLabel={isVideoFitCover ? "恢复原始画面" : "画面填充屏幕"}
+            >
+              {isVideoFitCover ? <Shrink color="white" size={20} /> : <Expand color="white" size={20} />}
+            </StyledButton>
+            <StyledButton
+              variant="ghost"
               onPress={() => {
                 onToggleOrientation?.();
               }}
@@ -157,22 +287,43 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       </View>
 
       <View style={styles.bottomControlsContainer}>
-        <View style={styles.progressBarContainer}>
+        <View
+          style={styles.progressBarContainer}
+          ref={progressBarContainerRef}
+          onLayout={(e) => {
+            progressBarWidthRef.current = e.nativeEvent.layout.width;
+            const container = progressBarContainerRef.current;
+            if (!container) return;
+            requestAnimationFrame(() => {
+              container.measureInWindow((x, _y, width) => {
+                progressBarPageXRef.current = x;
+                if (width) {
+                  progressBarWidthRef.current = width;
+                  hasProgressBarMeasurementRef.current = true;
+                }
+              });
+            });
+          }}
+        >
           <View style={styles.progressBarBackground} />
           <View
             style={[
               styles.progressBarFilled,
               {
-                width: `${(isSeeking ? seekPosition : progressPosition) * 100}%`,
+                width: `${displayedProgressPosition * 100}%`,
               },
             ]}
           />
-          <Pressable style={styles.progressBarTouchable} />
+          <View
+            collapsable={false}
+            style={styles.progressBarTouchable}
+            {...(panResponder ? panResponder.panHandlers : {})}
+          />
         </View>
 
         <ThemedText style={{ color: "white", marginTop: 5 }}>
           {status?.isLoaded
-            ? `${formatTime(status.positionMillis || 0)} / ${formatTime(status.durationMillis || 0)}`
+            ? `${formatTime(displayedPositionMillis)} / ${formatTime(durationMillis)}`
             : "00:00 / 00:00"}
         </ThemedText>
 

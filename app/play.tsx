@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useCallback, memo, useMemo, useState, Component, ErrorInfo, ReactNode } from "react";
-import { StyleSheet, TouchableOpacity, BackHandler, AppState, AppStateStatus, View, Platform, Text } from "react-native";
+import { StyleSheet, BackHandler, AppState, AppStateStatus, View, Platform, Text, Pressable } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -155,10 +155,12 @@ function PlayScreenContent() {
 
   const videoViewRef = useRef<any>(null);
   const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isControlsAutoHidePausedRef = useRef(false);
   const isTogglingOrientationRef = useRef(false);
   const router = useRouter();
   useKeepAwake();
   const [isLandscape, setIsLandscape] = useState(false);
+  const [videoContentFit, setVideoContentFit] = useState<"contain" | "cover">(() => (Platform.isTV ? "contain" : "cover"));
 
   // 响应式布局配置
   const { deviceType } = useResponsiveLayout();
@@ -393,6 +395,10 @@ function PlayScreenContent() {
     await startPictureInPicture();
   }, [setShowControls, startPictureInPicture]);
 
+  const onToggleVideoContentFit = useCallback(() => {
+    setVideoContentFit((prev) => (prev === "contain" ? "cover" : "contain"));
+  }, []);
+
   // PiP 事件回调
   const onPictureInPictureStart = useCallback(() => {
     logger.info('[PlayScreen] Entered PiP mode');
@@ -423,15 +429,35 @@ function PlayScreenContent() {
 
   const resetControlsTimer = useCallback(() => {
     if (deviceType === "tv") return;
+    if (isControlsAutoHidePausedRef.current) return;
 
     if (controlsTimerRef.current) {
       clearTimeout(controlsTimerRef.current);
     }
 
     controlsTimerRef.current = setTimeout(() => {
+      if (isControlsAutoHidePausedRef.current) return;
       setShowControls(false);
     }, CONTROLS_TIMEOUT);
   }, [deviceType, setShowControls]);
+
+  const pauseControlsAutoHide = useCallback(() => {
+    if (deviceType === "tv") return;
+    isControlsAutoHidePausedRef.current = true;
+
+    if (controlsTimerRef.current) {
+      clearTimeout(controlsTimerRef.current);
+      controlsTimerRef.current = null;
+    }
+  }, [deviceType]);
+
+  const resumeControlsAutoHide = useCallback(() => {
+    if (deviceType === "tv") return;
+    isControlsAutoHidePausedRef.current = false;
+    if (showControls) {
+      resetControlsTimer();
+    }
+  }, [deviceType, resetControlsTimer, showControls]);
 
   // 加载视频
   useEffect(() => {
@@ -565,18 +591,14 @@ function PlayScreenContent() {
 
   return (
     <ThemedView focusable style={dynamicStyles.container}>
-      <TouchableOpacity
-        activeOpacity={1}
-        style={dynamicStyles.videoContainer}
-        onPress={onScreenPress}
-      >
+      <View style={dynamicStyles.videoContainer}>
         {/* 使用 expo-video 的 VideoView */}
         {currentEpisode?.url && player && VideoView ? (
           <VideoView
             ref={videoViewRef}
             style={dynamicStyles.videoPlayer}
             player={player}
-            contentFit="contain"
+            contentFit={videoContentFit}
             nativeControls={false}
             allowsPictureInPicture={isTouchDevice}
             startsPictureInPictureAutomatically={isTouchDevice}
@@ -587,17 +609,24 @@ function PlayScreenContent() {
           <LoadingContainer style={dynamicStyles.loadingContainer} currentEpisode={currentEpisode} />
         )}
 
-        {showControls && (
-          <PlayerControls
-            showControls={showControls}
-            setShowControls={setShowControls}
-            onUserActivity={resetControlsTimer}
-            onBack={onBackPress}
-            isLandscape={isLandscape}
-            onToggleOrientation={onToggleOrientationPress}
-            onPiPPress={onPiPPress}
-          />
-        )}
+        {/* 背景点击层：用于切换控制栏显示/隐藏（放在控件下面，避免吞掉控件手势） */}
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={onScreenPress} />
+
+		        {showControls && (
+		          <PlayerControls
+		            showControls={showControls}
+		            setShowControls={setShowControls}
+		            isVideoFitCover={videoContentFit === "cover"}
+		            onToggleVideoFit={onToggleVideoContentFit}
+		            onUserActivity={resetControlsTimer}
+		            onInteractionStart={pauseControlsAutoHide}
+		            onInteractionEnd={resumeControlsAutoHide}
+		            onBack={onBackPress}
+		            isLandscape={isLandscape}
+	            onToggleOrientation={onToggleOrientationPress}
+	            onPiPPress={onPiPPress}
+	          />
+	        )}
 
         <SeekingBar />
 
@@ -607,7 +636,7 @@ function PlayScreenContent() {
             <VideoLoadingAnimation showProgressBar />
           </View>
         )}
-      </TouchableOpacity>
+      </View>
 
       <EpisodeSelectionModal />
       <SourceSelectionModal />

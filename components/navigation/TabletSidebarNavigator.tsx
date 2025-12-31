@@ -17,9 +17,9 @@ interface SidebarItem {
 
 const sidebarItems: SidebarItem[] = [
   { key: 'home', label: '首页', icon: Home, route: '/', section: 'main' },
-  { key: 'search', label: '搜索', icon: Search, route: '/search', section: 'main' },
+  { key: 'favorites', label: '收藏', icon: Heart, route: '/favorites', section: 'main' },
   { key: 'live', label: '直播', icon: Tv, route: '/live', section: 'main' },
-  { key: 'favorites', label: '收藏', icon: Heart, route: '/favorites', section: 'user' },
+  { key: 'search', label: '搜索', icon: Search, route: '/search', section: 'main' },
   { key: 'settings', label: '设置', icon: Settings, route: '/settings', section: 'user' },
 ];
 
@@ -38,7 +38,7 @@ const TabletSidebarNavigator: React.FC<TabletSidebarNavigatorProps> = ({
   const pathname = usePathname();
   const { spacing, isPortrait } = useResponsiveLayout();
   
-  const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const [internalCollapsed, setInternalCollapsed] = useState(true);
   
   // 使用外部控制的collapsed状态，如果没有则使用内部状态
   const collapsed = controlledCollapsed !== undefined ? controlledCollapsed : internalCollapsed;
