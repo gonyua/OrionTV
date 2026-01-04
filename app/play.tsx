@@ -337,16 +337,26 @@ function PlayScreenContent() {
   // 轮询状态更新
   const lastStatus = useRef<string>('idle');
   const hasSetInitialPosition = useRef(false);
+  const hasReadyForCurrentUrlRef = useRef(false);
   const lastUrl = useRef<string | null>(null);
+
+  const setStoreLoadingIfChanged = useCallback((loading: boolean) => {
+    const current = usePlayerStore.getState().isLoading;
+    if (current !== loading) {
+      usePlayerStore.setState({ isLoading: loading });
+    }
+  }, []);
 
   // 当 URL 变化时重置
   useEffect(() => {
     if (currentEpisode?.url && currentEpisode.url !== lastUrl.current) {
       hasSetInitialPosition.current = false;
+      hasReadyForCurrentUrlRef.current = false;
+      setStoreLoadingIfChanged(true);
       lastUrl.current = currentEpisode.url;
       logger.info(`[PlayScreen] URL changed to: ${currentEpisode.url.substring(0, 100)}...`);
     }
-  }, [currentEpisode?.url]);
+  }, [currentEpisode?.url, setStoreLoadingIfChanged]);
 
   // 播放速度变化
   useEffect(() => {
@@ -376,7 +386,10 @@ function PlayScreenContent() {
           lastStatus.current = currentStatus;
 
           if (currentStatus === 'readyToPlay') {
-            usePlayerStore.setState({ isLoading: false });
+            if (!hasReadyForCurrentUrlRef.current) {
+              hasReadyForCurrentUrlRef.current = true;
+              setStoreLoadingIfChanged(false);
+            }
 
             if (!hasSetInitialPosition.current) {
               const jumpPosition = initialPosition || introEndTime || 0;
@@ -390,9 +403,12 @@ function PlayScreenContent() {
 
             player.play();
           } else if (currentStatus === 'loading') {
-            usePlayerStore.setState({ isLoading: true });
+            if (!hasReadyForCurrentUrlRef.current) {
+              setStoreLoadingIfChanged(true);
+            }
           } else if (currentStatus === 'error') {
             logger.error('[PlayScreen] Player error state');
+            setStoreLoadingIfChanged(false);
             Toast.show({ type: "error", text1: "视频播放失败" });
           }
         }
@@ -415,28 +431,38 @@ function PlayScreenContent() {
     }, 500);
 
     return () => clearInterval(interval);
-  }, [shouldUseExpoAv, player, initialPosition, introEndTime]);
+  }, [shouldUseExpoAv, player, initialPosition, introEndTime, setStoreLoadingIfChanged]);
 
   const onExpoAvPlaybackStatusUpdate = useCallback(
     (status: AVPlaybackStatus) => {
       expoAvStatusRef.current = status;
 
       if (!status.isLoaded) {
+        if (!hasReadyForCurrentUrlRef.current) {
+          setStoreLoadingIfChanged(true);
+        }
         usePlayerStore.getState().handlePlaybackStatusUpdate({
           isLoaded: false,
           error: status.error,
         });
         if (status.error) {
           logger.error('[PlayScreen] expo-av playback error:', status.error);
+          setStoreLoadingIfChanged(false);
           Toast.show({ type: "error", text1: "视频播放失败" });
         }
         return;
       }
 
-      if (status.isBuffering) {
-        usePlayerStore.setState({ isLoading: true });
-      } else if (status.isPlaying) {
-        usePlayerStore.setState({ isLoading: false });
+      const isPlaying = !!status.isPlaying;
+      const positionMillis = status.positionMillis ?? 0;
+
+      if (!hasReadyForCurrentUrlRef.current) {
+        if (!status.isBuffering) {
+          hasReadyForCurrentUrlRef.current = true;
+          setStoreLoadingIfChanged(false);
+        } else {
+          setStoreLoadingIfChanged(true);
+        }
       }
 
       if (!hasSetInitialPosition.current) {
@@ -450,13 +476,13 @@ function PlayScreenContent() {
 
       usePlayerStore.getState().handlePlaybackStatusUpdate({
         isLoaded: true,
-        isPlaying: status.isPlaying,
-        positionMillis: status.positionMillis ?? 0,
+        isPlaying,
+        positionMillis,
         durationMillis: status.durationMillis ?? 0,
         didJustFinish: status.didJustFinish ?? false,
       });
     },
-    [initialPosition, introEndTime]
+    [initialPosition, introEndTime, setStoreLoadingIfChanged]
   );
 
   // 设置 player 到 store

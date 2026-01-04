@@ -240,7 +240,7 @@ const usePlayerStore = create<PlayerState>((set, get) => ({
       logger.info(`[PERF] Episodes mapping (${episodes.length} episodes) took ${(episodesMappingEnd - episodesMappingStart).toFixed(2)}ms`);
       
       set({
-        isLoading: false,
+        isLoading: true,
         currentEpisodeIndex: episodeIndex,
         initialPosition: position || initialPositionFromRecord,
         playbackRate: savedPlaybackRate,
@@ -570,7 +570,7 @@ const usePlayerStore = create<PlayerState>((set, get) => ({
         
         set({
           episodes: mappedEpisodes,
-          isLoading: false, // 让Video组件重新渲染
+          isLoading: true,
         });
         
         const perfEnd = performance.now();
