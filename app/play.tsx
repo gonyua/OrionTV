@@ -115,7 +115,8 @@ function createExpoAvPlayerAdapter(
         if (!status.isLoaded) {
           return status.error ? "error" : "loading";
         }
-        if (status.isBuffering) return "loading";
+        // 某些 TV 设备上可能出现 isBuffering=true 但仍在播放的情况，此时不应一直处于 loading
+        if (status.isBuffering && !status.isPlaying) return "loading";
         return "readyToPlay";
       },
       enumerable: true,
@@ -339,6 +340,14 @@ function PlayScreenContent() {
   const hasSetInitialPosition = useRef(false);
   const hasReadyForCurrentUrlRef = useRef(false);
   const lastUrl = useRef<string | null>(null);
+  const bufferingTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const clearBufferingTimer = useCallback(() => {
+    if (bufferingTimerRef.current) {
+      clearTimeout(bufferingTimerRef.current);
+      bufferingTimerRef.current = null;
+    }
+  }, []);
 
   const setStoreLoadingIfChanged = useCallback((loading: boolean) => {
     const current = usePlayerStore.getState().isLoading;
@@ -347,16 +356,33 @@ function PlayScreenContent() {
     }
   }, []);
 
+  const scheduleShowLoading = useCallback(() => {
+    // 避免 TV 端频繁短暂 buffering 导致 loading 闪烁：buffering 持续一段时间后再展示
+    if (bufferingTimerRef.current) return;
+    bufferingTimerRef.current = setTimeout(() => {
+      bufferingTimerRef.current = null;
+      setStoreLoadingIfChanged(true);
+    }, 800);
+  }, [setStoreLoadingIfChanged]);
+
   // 当 URL 变化时重置
   useEffect(() => {
     if (currentEpisode?.url && currentEpisode.url !== lastUrl.current) {
       hasSetInitialPosition.current = false;
       hasReadyForCurrentUrlRef.current = false;
+      clearBufferingTimer();
       setStoreLoadingIfChanged(true);
       lastUrl.current = currentEpisode.url;
       logger.info(`[PlayScreen] URL changed to: ${currentEpisode.url.substring(0, 100)}...`);
     }
-  }, [currentEpisode?.url, setStoreLoadingIfChanged]);
+  }, [currentEpisode?.url, clearBufferingTimer, setStoreLoadingIfChanged]);
+
+  // 卸载时清理定时器
+  useEffect(() => {
+    return () => {
+      clearBufferingTimer();
+    };
+  }, [clearBufferingTimer]);
 
   // 播放速度变化
   useEffect(() => {
@@ -438,6 +464,7 @@ function PlayScreenContent() {
       expoAvStatusRef.current = status;
 
       if (!status.isLoaded) {
+        clearBufferingTimer();
         if (!hasReadyForCurrentUrlRef.current) {
           setStoreLoadingIfChanged(true);
         }
@@ -455,13 +482,28 @@ function PlayScreenContent() {
 
       const isPlaying = !!status.isPlaying;
       const positionMillis = status.positionMillis ?? 0;
+      const isBuffering = !!status.isBuffering;
+
+      // TV 端存在 isBuffering=true 但视频已开始播放的情况：用 isPlaying/position 推断“已开始播放”
+      const hasPlaybackStarted = isPlaying || positionMillis > 0;
+
+      if (!hasReadyForCurrentUrlRef.current && hasPlaybackStarted) {
+        hasReadyForCurrentUrlRef.current = true;
+        clearBufferingTimer();
+        setStoreLoadingIfChanged(false);
+      }
 
       if (!hasReadyForCurrentUrlRef.current) {
-        if (!status.isBuffering) {
-          hasReadyForCurrentUrlRef.current = true;
-          setStoreLoadingIfChanged(false);
+        // 首次进入，未开始播放前始终展示 loading
+        clearBufferingTimer();
+        setStoreLoadingIfChanged(true);
+      } else {
+        // 已进入播放阶段：只有在“确实卡住”时才展示 loading，避免频繁闪烁
+        if (isBuffering && !isPlaying) {
+          scheduleShowLoading();
         } else {
-          setStoreLoadingIfChanged(true);
+          clearBufferingTimer();
+          setStoreLoadingIfChanged(false);
         }
       }
 
@@ -482,7 +524,7 @@ function PlayScreenContent() {
         didJustFinish: status.didJustFinish ?? false,
       });
     },
-    [initialPosition, introEndTime, setStoreLoadingIfChanged]
+    [initialPosition, introEndTime, clearBufferingTimer, scheduleShowLoading, setStoreLoadingIfChanged]
   );
 
   // 设置 player 到 store
