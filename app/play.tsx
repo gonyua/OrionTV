@@ -115,8 +115,6 @@ function createExpoAvPlayerAdapter(
         if (!status.isLoaded) {
           return status.error ? "error" : "loading";
         }
-        // 某些 TV 设备上可能出现 isBuffering=true 但仍在播放的情况，此时不应一直处于 loading
-        if (status.isBuffering && !status.isPlaying) return "loading";
         return "readyToPlay";
       },
       enumerable: true,
@@ -340,14 +338,6 @@ function PlayScreenContent() {
   const hasSetInitialPosition = useRef(false);
   const hasReadyForCurrentUrlRef = useRef(false);
   const lastUrl = useRef<string | null>(null);
-  const bufferingTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const clearBufferingTimer = useCallback(() => {
-    if (bufferingTimerRef.current) {
-      clearTimeout(bufferingTimerRef.current);
-      bufferingTimerRef.current = null;
-    }
-  }, []);
 
   const setStoreLoadingIfChanged = useCallback((loading: boolean) => {
     const current = usePlayerStore.getState().isLoading;
@@ -356,33 +346,16 @@ function PlayScreenContent() {
     }
   }, []);
 
-  const scheduleShowLoading = useCallback(() => {
-    // 避免 TV 端频繁短暂 buffering 导致 loading 闪烁：buffering 持续一段时间后再展示
-    if (bufferingTimerRef.current) return;
-    bufferingTimerRef.current = setTimeout(() => {
-      bufferingTimerRef.current = null;
-      setStoreLoadingIfChanged(true);
-    }, 800);
-  }, [setStoreLoadingIfChanged]);
-
   // 当 URL 变化时重置
   useEffect(() => {
     if (currentEpisode?.url && currentEpisode.url !== lastUrl.current) {
       hasSetInitialPosition.current = false;
       hasReadyForCurrentUrlRef.current = false;
-      clearBufferingTimer();
       setStoreLoadingIfChanged(true);
       lastUrl.current = currentEpisode.url;
       logger.info(`[PlayScreen] URL changed to: ${currentEpisode.url.substring(0, 100)}...`);
     }
-  }, [currentEpisode?.url, clearBufferingTimer, setStoreLoadingIfChanged]);
-
-  // 卸载时清理定时器
-  useEffect(() => {
-    return () => {
-      clearBufferingTimer();
-    };
-  }, [clearBufferingTimer]);
+  }, [currentEpisode?.url, setStoreLoadingIfChanged]);
 
   // 播放速度变化
   useEffect(() => {
@@ -390,6 +363,32 @@ function PlayScreenContent() {
       player.playbackRate = playbackRate;
     }
   }, [player, playbackRate]);
+
+  // expo-av：对齐 286e022 的策略，仅用 loadStart/load 控制 loading（不跟随 buffering 抖动）
+  const onExpoAvLoadStart = useCallback(() => {
+    if (!currentEpisode?.url) return;
+    setStoreLoadingIfChanged(true);
+  }, [currentEpisode?.url, setStoreLoadingIfChanged]);
+
+  const onExpoAvLoad = useCallback(() => {
+    void (async () => {
+      try {
+        const jumpPosition = initialPosition || introEndTime || 0;
+        if (jumpPosition > 0 && !hasSetInitialPosition.current) {
+          logger.info(`[PlayScreen] (expo-av) onLoad seek to ${(jumpPosition / 1000).toFixed(2)}s`);
+          await videoViewRef.current?.setPositionAsync(jumpPosition);
+          hasSetInitialPosition.current = true;
+        }
+
+        await videoViewRef.current?.playAsync();
+      } catch (error) {
+        // onLoad 时的自动播放失败在部分 TV 上是可预期的，不做 toast
+        logger.warn('[PlayScreen] (expo-av) onLoad autoplay failed:', error);
+      } finally {
+        setStoreLoadingIfChanged(false);
+      }
+    })();
+  }, [initialPosition, introEndTime, setStoreLoadingIfChanged]);
 
   // 状态轮询
   useEffect(() => {
@@ -464,10 +463,6 @@ function PlayScreenContent() {
       expoAvStatusRef.current = status;
 
       if (!status.isLoaded) {
-        clearBufferingTimer();
-        if (!hasReadyForCurrentUrlRef.current) {
-          setStoreLoadingIfChanged(true);
-        }
         usePlayerStore.getState().handlePlaybackStatusUpdate({
           isLoaded: false,
           error: status.error,
@@ -482,30 +477,6 @@ function PlayScreenContent() {
 
       const isPlaying = !!status.isPlaying;
       const positionMillis = status.positionMillis ?? 0;
-      const isBuffering = !!status.isBuffering;
-
-      // TV 端存在 isBuffering=true 但视频已开始播放的情况：用 isPlaying/position 推断“已开始播放”
-      const hasPlaybackStarted = isPlaying || positionMillis > 0;
-
-      if (!hasReadyForCurrentUrlRef.current && hasPlaybackStarted) {
-        hasReadyForCurrentUrlRef.current = true;
-        clearBufferingTimer();
-        setStoreLoadingIfChanged(false);
-      }
-
-      if (!hasReadyForCurrentUrlRef.current) {
-        // 首次进入，未开始播放前始终展示 loading
-        clearBufferingTimer();
-        setStoreLoadingIfChanged(true);
-      } else {
-        // 已进入播放阶段：只有在“确实卡住”时才展示 loading，避免频繁闪烁
-        if (isBuffering && !isPlaying) {
-          scheduleShowLoading();
-        } else {
-          clearBufferingTimer();
-          setStoreLoadingIfChanged(false);
-        }
-      }
 
       if (!hasSetInitialPosition.current) {
         const jumpPosition = initialPosition || introEndTime || 0;
@@ -516,6 +487,11 @@ function PlayScreenContent() {
         hasSetInitialPosition.current = true;
       }
 
+      // 兜底：如果已开始播放但 loading 仍未被 onLoad 关掉，则关掉（不依赖 buffering）
+      if (usePlayerStore.getState().isLoading && (isPlaying || positionMillis > 0)) {
+        setStoreLoadingIfChanged(false);
+      }
+
       usePlayerStore.getState().handlePlaybackStatusUpdate({
         isLoaded: true,
         isPlaying,
@@ -524,7 +500,7 @@ function PlayScreenContent() {
         didJustFinish: status.didJustFinish ?? false,
       });
     },
-    [initialPosition, introEndTime, clearBufferingTimer, scheduleShowLoading, setStoreLoadingIfChanged]
+    [initialPosition, introEndTime, setStoreLoadingIfChanged]
   );
 
   // 设置 player 到 store
@@ -802,6 +778,8 @@ function PlayScreenContent() {
               isLooping={false}
               useNativeControls={false}
               progressUpdateIntervalMillis={500}
+              onLoadStart={onExpoAvLoadStart}
+              onLoad={onExpoAvLoad}
               onPlaybackStatusUpdate={onExpoAvPlaybackStatusUpdate}
               onError={() => {
                 Toast.show({ type: "error", text1: "视频播放失败" });
